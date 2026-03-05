@@ -1147,6 +1147,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdm-settings"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "gtk4",
+ "log",
+ "rdm-common",
+]
+
+[[package]]
 name = "rdm-snap"
 version = "0.1.0"
 dependencies = [

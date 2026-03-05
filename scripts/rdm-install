@@ -19,6 +19,7 @@ sudo install -Dm755 target/release/rdm-launcher "$PREFIX/bin/rdm-launcher"
 sudo install -Dm755 target/release/rdm-session  "$PREFIX/bin/rdm-session"
 sudo install -Dm755 target/release/rdm-snap     "$PREFIX/bin/rdm-snap"
 sudo install -Dm755 target/release/rdm-watermark "$PREFIX/bin/rdm-watermark"
+sudo install -Dm755 target/release/rdm-settings  "$PREFIX/bin/rdm-settings"
 sudo install -Dm755 scripts/rdm-start           "$PREFIX/bin/rdm-start"
 sudo install -Dm755 scripts/rdm-reload          "$PREFIX/bin/rdm-reload"
 

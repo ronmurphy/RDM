@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RdmConfig {
     #[serde(default)]
     pub panel: PanelConfig,
@@ -9,9 +9,11 @@ pub struct RdmConfig {
     pub launcher: LauncherConfig,
     #[serde(default)]
     pub snap: SnapConfig,
+    #[serde(default)]
+    pub wallpaper: WallpaperConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PanelConfig {
     #[serde(default = "default_panel_height")]
     pub height: i32,
@@ -28,7 +30,7 @@ pub struct PanelConfig {
     pub taskbar_mode: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct LauncherConfig {
     #[serde(default = "default_launcher_width")]
     pub width: i32,
@@ -36,7 +38,7 @@ pub struct LauncherConfig {
     pub height: i32,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SnapConfig {
     #[serde(default = "default_snap_threshold")]
     pub edge_threshold: i32,
@@ -52,6 +54,31 @@ fn default_launcher_width() -> i32 { 500 }
 fn default_launcher_height() -> i32 { 400 }
 fn default_snap_threshold() -> i32 { 20 }
 fn default_taskbar_mode() -> String { "icons".into() }
+fn default_wallpaper_path() -> String { String::new() }
+fn default_wallpaper_mode() -> String { "fill".into() }
+fn default_wallpaper_color() -> String { "#1a1b26".into() }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct WallpaperConfig {
+    #[serde(default = "default_wallpaper_path")]
+    pub path: String,
+    /// Mode: fill, center, stretch, fit, tile
+    #[serde(default = "default_wallpaper_mode")]
+    pub mode: String,
+    /// Fallback solid color
+    #[serde(default = "default_wallpaper_color")]
+    pub color: String,
+}
+
+impl Default for WallpaperConfig {
+    fn default() -> Self {
+        Self {
+            path: default_wallpaper_path(),
+            mode: default_wallpaper_mode(),
+            color: default_wallpaper_color(),
+        }
+    }
+}
 
 impl Default for PanelConfig {
     fn default() -> Self {
@@ -90,6 +117,7 @@ impl Default for RdmConfig {
             panel: PanelConfig::default(),
             launcher: LauncherConfig::default(),
             snap: SnapConfig::default(),
+            wallpaper: WallpaperConfig::default(),
         }
     }
 }
@@ -101,6 +129,14 @@ impl RdmConfig {
             Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
             Err(_) => Self::default(),
         }
+    }
+
+    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let dir = config_dir();
+        std::fs::create_dir_all(&dir)?;
+        let contents = toml::to_string_pretty(self)?;
+        std::fs::write(config_path(), contents)?;
+        Ok(())
     }
 }
 

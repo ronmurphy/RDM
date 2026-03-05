@@ -6,6 +6,7 @@ members = [
     "crates/rdm-session",
     "crates/rdm-common",
     "crates/rdm-watermark",
+    "crates/rdm-settings",
 ]
 resolver = "2"
 
