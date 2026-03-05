@@ -173,49 +173,28 @@ fn load_css() {
             min-width: 1px;
         }
 
-        .tray {
-            padding: 0 4px;
-        }
-
         .nerd-icon {
             font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
         }
 
-        .tray-battery {
-            padding: 4px 8px;
+        .tray-btn {
+            background: transparent;
+            color: #9ece6a;
+            border: none;
+            border-radius: 0;
+            padding: 4px 10px;
             font-size: 13px;
             min-height: 0;
         }
 
-        .battery-normal {
-            color: #9ece6a;
-        }
-
-        .battery-low {
-            color: #e0af68;
-        }
-
-        .battery-critical {
-            color: #f7768e;
-        }
-
-        .battery-charging {
-            color: #7dcfff;
-        }
-
-        .power-btn {
-            background: transparent;
-            color: #f7768e;
-            border: none;
-            border-radius: 0;
-            padding: 4px 10px;
-            font-size: 15px;
-            min-height: 0;
-        }
-
-        .power-btn:hover {
+        .tray-btn:hover {
             background-color: #292e42;
         }
+
+        .battery-normal { color: #9ece6a; }
+        .battery-low { color: #e0af68; }
+        .battery-critical { color: #f7768e; }
+        .battery-charging { color: #7dcfff; }
 
         popover contents {
             background-color: #1a1b26;

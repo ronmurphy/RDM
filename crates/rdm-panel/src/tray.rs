@@ -71,50 +71,62 @@ fn battery_css_class(capacity: u8, charging: bool) -> &'static str {
     }
 }
 
-/// Build the system tray area: battery label + power/session menu.
-/// Returns a Box widget to append to the panel.
-pub fn setup_tray(app: &gtk4::Application) -> gtk4::Box {
-    let tray_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-    tray_box.add_css_class("tray");
-
-    // --- Battery indicator ---
-    let bat = read_battery();
-    let battery_label = gtk4::Label::new(None);
-    battery_label.add_css_class("tray-battery");
-    battery_label.add_css_class("nerd-icon");
-
-    if bat.present {
-        update_battery_label(&battery_label, &bat);
-        tray_box.append(&battery_label);
-
-        // Update every 30 seconds
-        let label = battery_label.clone();
-        gtk4::glib::timeout_add_local(std::time::Duration::from_secs(30), move || {
-            let bat = read_battery();
-            update_battery_label(&label, &bat);
-            gtk4::glib::ControlFlow::Continue
-        });
-    }
-
-    // --- Power / session menu button ---
-    let power_btn = gtk4::MenuButton::new();
-    power_btn.add_css_class("power-btn");
-    power_btn.add_css_class("nerd-icon");
-    power_btn.set_label("\u{f0425}"); // 󰐥 power icon (nerd)
+/// Build the system tray: single menu button with battery info + session submenu.
+pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
+    let tray_btn = gtk4::MenuButton::new();
+    tray_btn.add_css_class("tray-btn");
+    tray_btn.add_css_class("nerd-icon");
 
     let menu = gtk4::gio::Menu::new();
 
-    // Power section
-    let power_section = gtk4::gio::Menu::new();
-    power_section.append(Some("\u{f033e}  Lock"), Some("app.lock"));        // 󰌾
-    power_section.append(Some("\u{f0343}  Logout"), Some("app.logout"));    // 󰍃
-    power_section.append(Some("\u{f0709}  Reboot"), Some("app.reboot"));    // 󰜉
-    power_section.append(Some("\u{f0425}  Shutdown"), Some("app.shutdown")); // 󰐥
-    menu.append_section(None, &power_section);
+    // --- Battery section (if present) ---
+    let bat = read_battery();
+    if bat.present {
+        let battery_section = gtk4::gio::Menu::new();
+        let bat_label = battery_menu_label(&bat);
+        // Battery item is just informational — uses a no-op action
+        battery_section.append(Some(&bat_label), Some("app.battery-info"));
+        menu.append_section(None, &battery_section);
 
-    power_btn.set_menu_model(Some(&menu));
+        // No-op action for battery display
+        let battery_action = gtk4::gio::SimpleAction::new("battery-info", None);
+        battery_action.set_enabled(false);
+        app.add_action(&battery_action);
 
-    // Wire up actions
+        // Update the tray button label with battery info and refresh menu periodically
+        update_tray_button(&tray_btn, &bat);
+
+        let btn_clone = tray_btn.clone();
+        let menu_ref = menu.clone();
+        gtk4::glib::timeout_add_local(std::time::Duration::from_secs(30), move || {
+            let bat = read_battery();
+            update_tray_button(&btn_clone, &bat);
+            // Update battery item label — replace section 0 entirely
+            if menu_ref.n_items() > 0 {
+                menu_ref.remove(0);
+                let bat_section = gtk4::gio::Menu::new();
+                bat_section.append(Some(&battery_menu_label(&bat)), Some("app.battery-info"));
+                menu_ref.insert_section(0, None, &bat_section);
+            }
+            gtk4::glib::ControlFlow::Continue
+        });
+    } else {
+        // No battery — just show power icon
+        tray_btn.set_label("\u{f0425}"); // 󰐥
+    }
+
+    // --- Session submenu ---
+    let session_submenu = gtk4::gio::Menu::new();
+    session_submenu.append(Some("\u{f033e}  Lock"), Some("app.lock"));
+    session_submenu.append(Some("\u{f0343}  Logout"), Some("app.logout"));
+    session_submenu.append(Some("\u{f0709}  Reboot"), Some("app.reboot"));
+    session_submenu.append(Some("\u{f0425}  Shutdown"), Some("app.shutdown"));
+
+    menu.append_submenu(Some("\u{f0425}  Session"), &session_submenu);
+
+    tray_btn.set_menu_model(Some(&menu));
+
+    // --- Wire up session actions ---
     let action_lock = gtk4::gio::SimpleAction::new("lock", None);
     action_lock.connect_activate(|_, _| {
         if let Err(e) = std::process::Command::new("swaylock").spawn() {
@@ -142,22 +154,25 @@ pub fn setup_tray(app: &gtk4::Application) -> gtk4::Box {
     app.add_action(&action_reboot);
     app.add_action(&action_shutdown);
 
-    tray_box.append(&power_btn);
-
-    tray_box
+    tray_btn
 }
 
-fn update_battery_label(label: &gtk4::Label, bat: &BatteryState) {
+fn battery_menu_label(bat: &BatteryState) -> String {
     let icon = battery_icon(bat.capacity, bat.charging);
-    label.set_label(&format!("{} {}%", icon, bat.capacity));
+    let status = if bat.charging { "Charging" } else { "Battery" };
+    format!("{}  {} {}%", icon, status, bat.capacity)
+}
 
-    // Update tooltip
-    let status = if bat.charging { "Charging" } else { "On battery" };
-    label.set_tooltip_text(Some(&format!("{}  —  {}%", status, bat.capacity)));
+fn update_tray_button(btn: &gtk4::MenuButton, bat: &BatteryState) {
+    let icon = battery_icon(bat.capacity, bat.charging);
+    btn.set_label(&format!("{} {}%", icon, bat.capacity));
 
-    // Update CSS class for color
+    // Color the button based on battery state
     for cls in &["battery-normal", "battery-low", "battery-critical", "battery-charging"] {
-        label.remove_css_class(cls);
+        btn.remove_css_class(cls);
     }
-    label.add_css_class(battery_css_class(bat.capacity, bat.charging));
+    btn.add_css_class(battery_css_class(bat.capacity, bat.charging));
+
+    let status = if bat.charging { "Charging" } else { "On battery" };
+    btn.set_tooltip_text(Some(&format!("{}  —  {}%", status, bat.capacity)));
 }
