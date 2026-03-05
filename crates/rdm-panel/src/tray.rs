@@ -9,10 +9,10 @@ struct BatteryState {
 }
 
 fn read_battery() -> BatteryState {
-    let base = Path::new("/sys/class/power_supply/BAT0");
-    if !base.exists() {
-        return BatteryState { capacity: 0, charging: false, present: false };
-    }
+    let base = match find_battery_path() {
+        Some(p) => p,
+        None => return BatteryState { capacity: 0, charging: false, present: false },
+    };
 
     let capacity = std::fs::read_to_string(base.join("capacity"))
         .ok()
@@ -24,6 +24,25 @@ fn read_battery() -> BatteryState {
     let charging = status.trim() == "Charging" || status.trim() == "Full";
 
     BatteryState { capacity, charging, present: true }
+}
+
+/// Find the first real battery in /sys/class/power_supply/ (BAT0, BAT1, etc.)
+fn find_battery_path() -> Option<std::path::PathBuf> {
+    let ps_dir = Path::new("/sys/class/power_supply");
+    let mut entries: Vec<_> = std::fs::read_dir(ps_dir).ok()?
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        let path = entry.path();
+        let dev_type = std::fs::read_to_string(path.join("type"))
+            .unwrap_or_default();
+        if dev_type.trim() == "Battery" && path.join("capacity").exists() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// Pick a nerd font battery icon based on level + charging state
@@ -71,6 +90,63 @@ fn battery_css_class(capacity: u8, charging: bool) -> &'static str {
     }
 }
 
+/// Read battery state from a UPower D-Bus proxy's cached properties
+fn read_upower_state(proxy: &gtk4::gio::DBusProxy) -> BatteryState {
+    let capacity = proxy.cached_property("Percentage")
+        .and_then(|v| v.get::<f64>())
+        .unwrap_or(0.0) as u8;
+    let state = proxy.cached_property("State")
+        .and_then(|v| v.get::<u32>())
+        .unwrap_or(0);
+    // UPower states: 1=Charging, 4=FullyCharged
+    let charging = state == 1 || state == 4;
+    BatteryState { capacity, charging, present: true }
+}
+
+/// Subscribe to UPower D-Bus signals for real-time battery updates.
+/// Falls back silently if UPower is not available.
+fn subscribe_upower_battery(btn: gtk4::MenuButton, menu: gtk4::gio::Menu) {
+    let bat_name = match find_battery_path() {
+        Some(p) => match p.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => return,
+        },
+        None => return,
+    };
+    let device_path = format!("/org/freedesktop/UPower/devices/battery_{}", bat_name);
+
+    let proxy = match gtk4::gio::DBusProxy::for_bus_sync(
+        gtk4::gio::BusType::System,
+        gtk4::gio::DBusProxyFlags::NONE,
+        None,
+        "org.freedesktop.UPower",
+        &device_path,
+        "org.freedesktop.UPower.Device",
+        gtk4::gio::Cancellable::NONE,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("UPower D-Bus unavailable, battery won't auto-update: {}", e);
+            return;
+        }
+    };
+
+    log::info!("Subscribed to UPower battery signals on {}", device_path);
+
+    proxy.connect_local("g-properties-changed", false, move |values| {
+        let proxy: gtk4::gio::DBusProxy = values[0].get().unwrap();
+        let bat = read_upower_state(&proxy);
+        update_tray_button(&btn, &bat);
+        if menu.n_items() > 0 {
+            menu.remove(0);
+            let section = gtk4::gio::Menu::new();
+            section.append(Some(&battery_menu_label(&bat)), Some("app.battery-info"));
+            menu.insert_section(0, None, &section);
+        }
+        None
+    });
+}
+
 /// Build the system tray: single menu button with battery info + session submenu.
 pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
     let tray_btn = gtk4::MenuButton::new();
@@ -80,46 +156,54 @@ pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
     let menu = gtk4::gio::Menu::new();
 
     // --- Battery section (if present) ---
-    let bat = read_battery();
-    if bat.present {
+    let has_battery = find_battery_path().is_some();
+    if has_battery {
+        let bat = read_battery();
         let battery_section = gtk4::gio::Menu::new();
-        let bat_label = battery_menu_label(&bat);
-        // Battery item is just informational — uses a no-op action
-        battery_section.append(Some(&bat_label), Some("app.battery-info"));
+        battery_section.append(Some(&battery_menu_label(&bat)), Some("app.battery-info"));
         menu.append_section(None, &battery_section);
 
-        // No-op action for battery display (guard against duplicate registration)
         if app.lookup_action("battery-info").is_none() {
             let battery_action = gtk4::gio::SimpleAction::new("battery-info", None);
             battery_action.set_enabled(false);
             app.add_action(&battery_action);
         }
 
-        // Update the tray button label with battery info and refresh menu periodically
         update_tray_button(&tray_btn, &bat);
 
-        let btn_clone = tray_btn.clone();
-        let menu_ref = menu.clone();
-        gtk4::glib::timeout_add_local(std::time::Duration::from_secs(30), move || {
-            let bat = read_battery();
-            update_tray_button(&btn_clone, &bat);
-            // Update battery item label — replace section 0 entirely
-            if menu_ref.n_items() > 0 {
-                menu_ref.remove(0);
-                let bat_section = gtk4::gio::Menu::new();
-                bat_section.append(Some(&battery_menu_label(&bat)), Some("app.battery-info"));
-                menu_ref.insert_section(0, None, &bat_section);
-            }
-            gtk4::glib::ControlFlow::Continue
-        });
+        // Subscribe to UPower D-Bus for real-time battery updates
+        subscribe_upower_battery(tray_btn.clone(), menu.clone());
     } else {
-        // No battery — just show power icon
         tray_btn.set_label("\u{f0425}"); // 󰐥
     }
 
-    // --- WiFi submenu ---
+    // --- WiFi submenu (populated on demand, not at startup) ---
     let wifi_submenu = crate::wifi::build_wifi_submenu(app);
     menu.append_submenu(Some("\u{f05a9}  WiFi"), &wifi_submenu);
+
+    // --- Refresh battery + WiFi on menu open (no background polling) ---
+    let btn_for_open = tray_btn.clone();
+    let menu_for_open = menu.clone();
+    let wifi_for_open = wifi_submenu.clone();
+    tray_btn.connect_notify_local(Some("active"), move |btn, _| {
+        let active: bool = btn.property("active");
+        if !active {
+            return;
+        }
+        // Refresh battery
+        if has_battery {
+            let bat = read_battery();
+            update_tray_button(&btn_for_open, &bat);
+            if menu_for_open.n_items() > 0 {
+                menu_for_open.remove(0);
+                let bat_section = gtk4::gio::Menu::new();
+                bat_section.append(Some(&battery_menu_label(&bat)), Some("app.battery-info"));
+                menu_for_open.insert_section(0, None, &bat_section);
+            }
+        }
+        // Refresh WiFi
+        crate::wifi::populate_wifi_menu(&wifi_for_open);
+    });
 
     // --- Session submenu ---
     let session_submenu = gtk4::gio::Menu::new();
