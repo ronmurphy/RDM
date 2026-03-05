@@ -31,9 +31,9 @@ This document is a developer-facing reference for how RDM is built, what each co
 
 RDM (Rust Desktop Manager) is a Wayland desktop environment that runs on top of **labwc**, a wlroots-based compositor. The project is a Cargo workspace with 7 crates — 6 binaries and 1 shared library.
 
-All GUI components use **GTK4** with **gtk4-layer-shell** to create shell surfaces (panels, overlays, desktop widgets). The taskbar uses the **wlr-foreign-toplevel-management** Wayland protocol directly via `wayland-client` to track open windows.
+All GUI components use **Qt/QML** (via the `qmetaobject` Rust crate) with **layer-shell-qt** to create shell surfaces (panels, overlays, desktop widgets). The taskbar uses the **wlr-foreign-toplevel-management** Wayland protocol directly via `wayland-client` to track open windows.
 
-The color theme is **Tokyo Night** throughout, with CSS hardcoded in each component's `load_css()` function.
+The color theme is **Tokyo Night** throughout, with colors defined inline in each component's QML UI code.
 
 ---
 
@@ -59,7 +59,7 @@ RDM/
 │   ├── rdm-panel/             # Panel bar (taskbar, clock, tray, wifi)
 │   ├── rdm-launcher/          # Overlay app launcher
 │   ├── rdm-watermark/         # Desktop version watermark
-│   ├── rdm-settings/          # GTK4 settings app
+│   ├── rdm-settings/          # QML settings app
 │   └── rdm-snap/              # Window snap daemon (stub)
 ```
 
@@ -128,7 +128,7 @@ Written to `~/.config/rdm/session.pid` so `rdm-reload` can find the session mana
 **Binary:** `rdm-panel`
 **Modules:** main.rs, clock.rs, taskbar.rs, toplevel.rs, tray.rs, wifi.rs
 
-The panel is a GTK4 layer-shell surface anchored to the top (or bottom) edge. It contains:
+The panel is a QML layer-shell surface anchored to the top (or bottom) edge. It contains:
 
 - **Left:** App launcher button ("Apps") — spawns `rdm-launcher` on click
 - **Center:** Taskbar showing running windows
@@ -137,12 +137,11 @@ The panel is a GTK4 layer-shell surface anchored to the top (or bottom) edge. It
 ### Layer Shell Setup
 
 ```rust
-window.init_layer_shell();
-window.set_layer(Layer::Top);
-window.set_anchor(Edge::Left, true);
-window.set_anchor(Edge::Right, true);
-window.set_anchor(Edge::Top, at_top);     // or Bottom
-window.auto_exclusive_zone_enable();       // reserves space
+// Layer-shell is configured in QML via org.kde.layershell:
+// LayerShell.Window.layer: LayerShell.Window.LayerTop
+// LayerShell.Window.anchors: AnchorLeft | AnchorRight | AnchorTop
+// LayerShell.Window.exclusionZone: panelHeight
+// The env var QT_WAYLAND_SHELL_INTEGRATION=layer-shell is also set from Rust.
 ```
 
 ### Taskbar (toplevel.rs + taskbar.rs)
@@ -153,44 +152,43 @@ window.auto_exclusive_zone_enable();       // reserves space
 - Binds `zwlr_foreign_toplevel_manager_v1` to receive toplevel events (new window, title change, state change, closed)
 - Each toplevel gets a numeric ID; events update a `HandleState` struct
 - On every change, `flush_to_shared()` copies state into an `Arc<Mutex<SharedState>>` with a generation counter
-- The GTK side polls this shared state every 250ms
+- The UI side polls this shared state every 250ms via a QML Timer
 
 **Critical implementation detail:** The `event_created_child!` macro must be defined for `ZwlrForeignToplevelManagerV1` → `ZwlrForeignToplevelHandleV1`. Without this, wayland-client panics when the compositor creates new toplevel handle objects. This was a major debugging issue during development.
 
-**taskbar.rs** — GTK widget management.
+**taskbar.rs** — Utility functions for the QML taskbar.
 
-- `setup_taskbar(container, mode)` starts the toplevel tracker thread and sets up a 250ms poll timer
-- On each poll, compares the generation counter to avoid unnecessary updates
-- Removes stale widgets (closed windows), adds new ones, updates existing
-- Three display modes controlled by `TaskbarMode`:
-  - `Text` — `gtk4::Button` with window title
-  - `Icons` — `gtk4::Button` with a `gtk4::Image` from the icon theme (`resolve_icon_name()` maps app_id to theme icons with fallbacks)
-  - `Nerd` — `gtk4::Button` with a Nerd Font glyph label (`nerd_glyph_for()` maps app_id to Unicode glyphs)
+- Provides `nerd_glyph_for()` to map app_id to Nerd Font glyphs
+- Provides `truncate_title()` for display truncation
+- Three display modes controlled by `taskbarMode` property:
+  - `text` — Window title in taskbar buttons
+  - `icons` — Nerd Font glyphs based on app_id
+  - `nerd` — Nerd Font glyphs (same as icons, using glyph mapping)
+- The taskbar data is exposed to QML via `TaskbarModel` (QAbstractListModel in main.rs)
 
-**Action channel:** A `std::sync::mpsc` channel allows the GTK thread to send `ToplevelAction::Activate(id)` or `Close(id)` back to the Wayland thread, which calls the corresponding protocol methods.
+**Action channel:** A `std::sync::mpsc` channel allows the UI thread to send `ToplevelAction::Activate(id)` or `Close(id)` back to the Wayland thread, which calls the corresponding protocol methods.
 
 ### Clock (clock.rs)
 
-Simple `glib::timeout_add_seconds_local(1, ...)` that formats the current time with `chrono` and updates a GTK Label. Format string comes from config (default: `"%H:%M  %b %d"`).
+Simple QML `Timer` (1 second interval) that calls `PanelBackend::update_clock()`, which formats the current time with `chrono` and updates the `clockText` property. Format string comes from config (default: `"%H:%M  %b %d"`).
 
 ### System Tray (tray.rs)
 
-A single `gtk4::MenuButton` that shows a GIO `Menu` with:
+A `TrayBackend` QObject exposed to QML as a context property. Provides:
 
-1. **Battery section** — reads `/sys/class/power_supply/BAT0/capacity` and `status`. Displays 10 different Nerd Font battery icons (5 for discharging levels, 5 for charging levels). Color-coded: green (>40%), yellow (15-40%), red (<15%), blue (charging). Updates every 30s.
-2. **WiFi submenu** — delegated to `wifi.rs`
-3. **Session submenu** — Lock (swaylock), Logout (labwc exit), Reboot, Shutdown via `loginctl`
+1. **Battery section** — reads `/sys/class/power_supply/BAT0/capacity` and `status`. Displays 10 different Nerd Font battery icons (5 for discharging levels, 5 for charging levels). Color-coded: green (>40%), yellow (15-40%), red (<15%), blue (charging). Updates every 30s via QML Timer.
+2. **WiFi submenu** — `WifiModel` (QAbstractListModel) backed by `wifi.rs`
+3. **Session submenu** — Lock (swaylock), Logout (labwc exit), Reboot, Shutdown via systemctl
 
 The button label shows the battery icon + percentage (e.g., "󰂁 85%").
 
 ### WiFi (wifi.rs)
 
 - `scan_networks()` — calls `nmcli -t -f SSID,SIGNAL,SECURITY,IN-USE dev wifi list`, parses output
-- `build_wifi_submenu()` — creates GIO menu items with signal strength Nerd Font icons (▂▄▆█ variants), lock icon for secured networks, checkmark for the currently connected network
-- On click: known networks connect directly via `nmcli con up`; unknown secured networks show a GTK4 password dialog with `gtk4::PasswordEntry`
-- `connect_new()` — `nmcli dev wifi connect <ssid> password <pw>` (NetworkManager auto-saves credentials)
-- Uses `async_channel` for the password dialog → connection flow
-- Auto-refreshes every 30s, plus a manual "Refresh" menu item
+- `build_wifi_submenu()` replaced by `WifiModel` (QAbstractListModel) with `format_network_label()` providing Nerd Font icons (signal strength variants), lock icon for secured networks, checkmark for connected network
+- On click: known networks connect directly via `nmcli con up`; unknown networks are attempted through NetworkManager's own agent
+- Uses `connect_network()` for the connection flow
+- Auto-refreshes every 30s via QML Timer, plus a manual "Refresh" menu item
 
 ---
 
@@ -199,7 +197,7 @@ The button label shows the battery icon + percentage (e.g., "󰂁 85%").
 **Path:** `crates/rdm-launcher/`
 **Binary:** `rdm-launcher`
 
-An overlay layer-shell surface (`Layer::Overlay`) with exclusive keyboard grab. Contains:
+An overlay layer-shell surface (`LayerShell.Window.LayerOverlay`) with exclusive keyboard grab. Contains:
 
 - Search entry at the top
 - Scrolled list of `.desktop` file entries (loaded via `freedesktop-desktop-entry` crate)
@@ -217,7 +215,7 @@ The launcher is opened by the panel's "Apps" button (spawns `rdm-launcher` proce
 **Path:** `crates/rdm-watermark/`
 **Binary:** `rdm-watermark`
 
-A tiny layer-shell surface on `Layer::Bottom` (above wallpaper, below all windows), anchored to the bottom-right corner. Displays the build version string at 25% opacity. Non-interactive, zero exclusive zone.
+A tiny layer-shell surface on `LayerShell.Window.LayerBottom` (above wallpaper, below all windows), anchored to the bottom-right corner. Displays the build version string at 25% opacity. Non-interactive, zero exclusive zone.
 
 ---
 
@@ -226,7 +224,7 @@ A tiny layer-shell surface on `Layer::Bottom` (above wallpaper, below all window
 **Path:** `crates/rdm-settings/`
 **Binary:** `rdm-settings`
 
-A regular GTK4 window (not layer-shell) with a `Stack` + `StackSidebar` layout. Two pages:
+A regular Qt/QML window (not layer-shell) with a sidebar + StackLayout. Two pages:
 
 ### Panel Page
 - Taskbar Mode dropdown (icons / text / nerd)
@@ -236,18 +234,19 @@ A regular GTK4 window (not layer-shell) with a `Stack` + `StackSidebar` layout. 
 - Clock Format text entry
 
 ### Wallpaper Page
-- Image path display + Browse button (`FileChooserNative`) + Clear button
+- Image path display + Browse button (Qt `FileDialog`) + Clear button
 - Mode dropdown (fill / center / stretch / fit / tile)
 - Background Color text entry (hex)
 
 ### Apply Flow
 1. User clicks "Apply"
-2. Config is saved to `~/.config/rdm/rdm.toml` via `RdmConfig::save()`
-3. `apply_changes()` runs `rdm-reload` (shell script)
-4. `rdm-reload` sends SIGUSR1 to `rdm-session`
-5. Session manager stops all children, waits 800ms, restarts with fresh config
-6. `rdm-panel` reads new taskbar mode, position, etc. from `rdm.toml`
-7. `swaybg` gets new wallpaper args built from `rdm.toml`
+2. `SettingsBackend::apply()` is called from QML
+3. Config is saved to `~/.config/rdm/rdm.toml` via `RdmConfig::save()`
+4. `apply()` runs `rdm-reload` (shell script)
+5. `rdm-reload` sends SIGUSR1 to `rdm-session`
+6. Session manager stops all children, waits 800ms, restarts with fresh config
+7. `rdm-panel` reads new taskbar mode, position, etc. from `rdm.toml`
+8. `swaybg` gets new wallpaper args built from `rdm.toml`
 
 ---
 
@@ -290,7 +289,7 @@ Developer edits code
 
 ## Theming
 
-All components use the **Tokyo Night** color palette, applied via GTK4 `CssProvider::load_from_data()` in each binary's `load_css()` function.
+All components use the **Tokyo Night** color palette, applied inline in each binary's QML UI definition.
 
 Key colors:
 | Token | Hex | Usage |
@@ -316,17 +315,23 @@ Font stack: `"Inter", "Noto Sans", sans-serif` for UI; `"JetBrainsMono Nerd Font
 
 | Library | Version | Used For |
 |---------|---------|----------|
-| `gtk4` | 0.9 | All GUI (uses GTK 4.x C library) |
-| `gtk4-layer-shell` | 0.4 | Wayland layer-shell surfaces (panels, overlays) |
+| `qmetaobject` | 0.2 | Qt/QML integration from Rust (QObject, QAbstractListModel, QmlEngine) |
+| `qttypes` | 0.2 | Qt type wrappers (QString, QVariant, etc.) |
 | `wayland-client` | 0.31 | Direct Wayland protocol communication |
 | `wayland-protocols-wlr` | 0.3 | wlr-foreign-toplevel-management protocol |
 | `tokio` | 1 | Async runtime for session manager |
 | `serde` / `toml` | 1 / 0.8 | Config serialization |
 | `chrono` | 0.4 | Clock formatting, build timestamps |
 | `freedesktop-desktop-entry` | 0.7 | Parsing `.desktop` files for launcher |
-| `async-channel` | 2 | Async communication in WiFi password dialog |
 | `nix` | 0.29 | POSIX signal handling (SIGUSR1) |
 | `dirs` | 6 | XDG directory resolution |
+
+### System Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| Qt 6 (qt6-base, qt6-declarative, qt6-wayland) | Qt/QML runtime and development headers |
+| layer-shell-qt | Wayland layer-shell integration for Qt windows |
 
 ### Wayland Protocol: wlr-foreign-toplevel-management
 
@@ -336,7 +341,7 @@ This is the core protocol that makes the taskbar work. It's a wlroots extension 
 - Get window title, app_id, and state (activated, maximized, minimized, fullscreen)
 - Request actions: activate, close, maximize, minimize, fullscreen
 
-RDM connects to this protocol in a **separate thread** from GTK, using its own `wayland_client::Connection`. State is shared with the GTK main thread via `Arc<Mutex<SharedState>>` with a generation counter for efficient change detection.
+RDM connects to this protocol in a **separate thread** from Qt/QML, using its own `wayland_client::Connection`. State is shared with the QML main thread via `Arc<Mutex<SharedState>>` with a generation counter for efficient change detection.
 
 ---
 
@@ -344,9 +349,9 @@ RDM connects to this protocol in a **separate thread** from GTK, using its own `
 
 1. **`event_created_child!` macro is required** for wayland-client 0.31 when the compositor creates new objects via `new_id` events. Without it, the client panics. This must be defined for `ZwlrForeignToplevelManagerV1` dispatching to `ZwlrForeignToplevelHandleV1`.
 
-2. **gtk4 0.9 API differences** — Uses `CssProvider::load_from_data()` (not `load_from_string()` which is GTK 4.12+). Uses `FileChooserNative` instead of `FileDialog` (which requires GTK 4.10+/gtk4-rs 0.8+).
+2. **Qt/QML uses `qmetaobject` 0.2** — Provides Rust → QML bridge via `QObject` derive macro, `QAbstractListModel` for data models, and `QmlEngine` for the QML runtime. Requires Qt development headers and a C++ compiler at build time.
 
-3. **Session manager changes require re-login** — `rdm-session` is the parent of all other processes. Hot reload restarts its children, not itself.
+3. **Layer-shell via `layer-shell-qt`** — The `org.kde.layershell` QML module provides attached properties for configuring layer, anchors, exclusive zone, and keyboard interactivity. The environment variable `QT_WAYLAND_SHELL_INTEGRATION=layer-shell` is also set for each layer-shell binary.
 
 4. **swaybg args override** — The `args` field for swaybg in `session.toml` is ignored at runtime. `rdm-session` builds swaybg's arguments from `rdm.toml [wallpaper]` section so the settings app can change wallpapers.
 

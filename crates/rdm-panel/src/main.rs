@@ -253,8 +253,7 @@ struct PanelBackend {
 
 impl PanelBackend {
     fn from_config(config: &RdmConfig) -> Self {
-        let now = chrono::Local::now();
-        let clock_text = now.format(&config.panel.clock_format).to_string();
+        let clock_text = clock::format_now(&config.panel.clock_format);
 
         Self {
             panel_height: config.panel.height,
@@ -268,8 +267,7 @@ impl PanelBackend {
     }
 
     fn update_clock(&mut self) {
-        let now = chrono::Local::now();
-        self.clock_text = QString::from(now.format(&self.clock_format).to_string().as_str());
+        self.clock_text = QString::from(clock::format_now(&self.clock_format).as_str());
         self.clock_changed();
     }
 
