@@ -1,0 +1,13 @@
+[package]
+name = "rdm-common"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+chrono = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+log = { workspace = true }

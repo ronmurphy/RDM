@@ -1,0 +1,24 @@
+#!/bin/sh
+# rdm-reload — Hot reload all RDM desktop shell components
+# Sends SIGUSR1 to rdm-session, which kills and restarts all managed processes
+# This picks up newly-compiled binaries without restarting labwc
+
+PID_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/session.pid"
+
+if [ ! -f "$PID_FILE" ]; then
+    echo "ERROR: No RDM session PID file found at $PID_FILE"
+    echo "Is rdm-session running?"
+    exit 1
+fi
+
+PID=$(cat "$PID_FILE")
+
+if ! kill -0 "$PID" 2>/dev/null; then
+    echo "ERROR: rdm-session (pid=$PID) is not running"
+    rm -f "$PID_FILE"
+    exit 1
+fi
+
+echo "Sending hot-reload signal to rdm-session (pid=$PID)..."
+kill -USR1 "$PID"
+echo "Reload signal sent. Shell components will restart momentarily."

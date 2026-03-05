@@ -1,0 +1,42 @@
+#!/bin/sh
+# rdm-install — Build and install RDM Desktop binaries + session entry
+# Run after cloning or after making changes
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PREFIX="${PREFIX:-/usr/local}"
+
+echo "=== Building RDM Desktop ==="
+cd "$PROJECT_DIR"
+cargo build --release
+
+echo ""
+echo "=== Installing binaries to $PREFIX/bin ==="
+sudo install -Dm755 target/release/rdm-panel    "$PREFIX/bin/rdm-panel"
+sudo install -Dm755 target/release/rdm-launcher "$PREFIX/bin/rdm-launcher"
+sudo install -Dm755 target/release/rdm-session  "$PREFIX/bin/rdm-session"
+sudo install -Dm755 target/release/rdm-snap     "$PREFIX/bin/rdm-snap"
+sudo install -Dm755 target/release/rdm-watermark "$PREFIX/bin/rdm-watermark"
+sudo install -Dm755 scripts/rdm-start           "$PREFIX/bin/rdm-start"
+sudo install -Dm755 scripts/rdm-reload          "$PREFIX/bin/rdm-reload"
+
+echo ""
+echo "=== Installing session entry ==="
+sudo install -Dm644 config/rdm.desktop /usr/share/wayland-sessions/rdm.desktop
+
+echo ""
+echo "=== Installing default configs ==="
+RDM_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"
+mkdir -p "$RDM_CONFIG"
+# Only copy if not already present (don't overwrite user customizations)
+[ -f "$RDM_CONFIG/rdm.toml" ]     || cp config/rdm.toml "$RDM_CONFIG/"
+[ -f "$RDM_CONFIG/session.toml" ] || cp config/session.toml "$RDM_CONFIG/"
+
+echo ""
+echo "=== Done! ==="
+echo "RDM Desktop is installed."
+echo "  - Log out and select 'RDM Desktop' from your display manager"
+echo "  - Or from a TTY: exec rdm-start"
+echo "  - Hot reload after rebuilding: rdm-reload"

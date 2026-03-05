@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- RDM Desktop - labwc configuration
+     Place this at ~/.config/labwc/rc.xml or merge with your existing config -->
+<labwc_config>
+
+  <core>
+    <gap>4</gap>
+    <adaptiveSync>no</adaptiveSync>
+  </core>
+
+  <theme>
+    <name>RDM</name>
+    <cornerRadius>8</cornerRadius>
+    <font place="ActiveWindow">
+      <name>Inter</name>
+      <size>11</size>
+    </font>
+    <font place="InactiveWindow">
+      <name>Inter</name>
+      <size>11</size>
+    </font>
+  </theme>
+
+  <snapping>
+    <range>20</range>
+    <topMaximize>yes</topMaximize>
+  </snapping>
+
+  <keyboard>
+    <!-- App launcher -->
+    <keybind key="Super_L">
+      <action name="Execute" command="rdm-launcher" />
+    </keybind>
+
+    <!-- Terminal -->
+    <keybind key="S-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+
+    <!-- Window snapping: half-screen -->
+    <keybind key="S-Left">
+      <action name="SnapToEdge" direction="left" />
+    </keybind>
+    <keybind key="S-Right">
+      <action name="SnapToEdge" direction="right" />
+    </keybind>
+    <keybind key="S-Up">
+      <action name="SnapToEdge" direction="up" />
+    </keybind>
+    <keybind key="S-Down">
+      <action name="SnapToEdge" direction="down" />
+    </keybind>
+
+    <!-- Maximize -->
+    <keybind key="S-f">
+      <action name="ToggleMaximize" />
+    </keybind>
+
+    <!-- Close window -->
+    <keybind key="S-q">
+      <action name="Close" />
+    </keybind>
+
+    <!-- Workspaces -->
+    <keybind key="S-1">
+      <action name="GoToDesktop" to="1" />
+    </keybind>
+    <keybind key="S-2">
+      <action name="GoToDesktop" to="2" />
+    </keybind>
+    <keybind key="S-3">
+      <action name="GoToDesktop" to="3" />
+    </keybind>
+    <keybind key="S-4">
+      <action name="GoToDesktop" to="4" />
+    </keybind>
+
+    <!-- Move window to workspace -->
+    <keybind key="S-S-1">
+      <action name="SendToDesktop" to="1" follow="true" />
+    </keybind>
+    <keybind key="S-S-2">
+      <action name="SendToDesktop" to="2" follow="true" />
+    </keybind>
+    <keybind key="S-S-3">
+      <action name="SendToDesktop" to="3" follow="true" />
+    </keybind>
+    <keybind key="S-S-4">
+      <action name="SendToDesktop" to="4" follow="true" />
+    </keybind>
+  </keyboard>
+
+  <desktops number="4">
+    <names>
+      <name>1</name>
+      <name>2</name>
+      <name>3</name>
+      <name>4</name>
+    </names>
+  </desktops>
+
+</labwc_config>

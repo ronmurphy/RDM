@@ -1,0 +1,19 @@
+[package]
+name = "rdm-panel"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rdm-panel"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { workspace = true }
+gtk4-layer-shell = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols-wlr = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+freedesktop-desktop-entry = { workspace = true }
+rdm-common = { workspace = true }

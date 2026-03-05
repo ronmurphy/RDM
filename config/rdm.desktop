@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=RDM Desktop
+Comment=RDM Wayland Desktop Environment (labwc)
+Exec=rdm-start
+Type=Application
+DesktopNames=RDM

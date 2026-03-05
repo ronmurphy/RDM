@@ -1,0 +1,16 @@
+# RDM Desktop Configuration
+
+[panel]
+height = 32
+position = "top"
+show_clock = true
+show_workspaces = true
+clock_format = "%H:%M  %b %d"
+
+[launcher]
+width = 500
+height = 400
+
+[snap]
+edge_threshold = 20
+show_preview = true

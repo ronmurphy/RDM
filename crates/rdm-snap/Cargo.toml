@@ -1,0 +1,19 @@
+[package]
+name = "rdm-snap"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rdm-snap"
+path = "src/main.rs"
+
+[dependencies]
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+wayland-protocols-wlr = { workspace = true }
+gtk4 = { workspace = true }
+gtk4-layer-shell = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+nix = { workspace = true }
+rdm-common = { workspace = true }

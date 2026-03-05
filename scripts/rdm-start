@@ -1,0 +1,41 @@
+#!/bin/sh
+# RDM Desktop - Session start script
+# Launch with: rdm-start
+# Or from a display manager / TTY: exec rdm-start
+
+set -e
+
+export XDG_CURRENT_DESKTOP=RDM
+export XDG_SESSION_TYPE=wayland
+
+# Ensure config directory exists
+RDM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"
+mkdir -p "$RDM_CONFIG_DIR"
+
+# Copy default configs if not present
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/../config/rdm.toml" ] && [ ! -f "$RDM_CONFIG_DIR/rdm.toml" ]; then
+    cp "$SCRIPT_DIR/../config/rdm.toml" "$RDM_CONFIG_DIR/rdm.toml"
+fi
+if [ -f "$SCRIPT_DIR/../config/session.toml" ] && [ ! -f "$RDM_CONFIG_DIR/session.toml" ]; then
+    cp "$SCRIPT_DIR/../config/session.toml" "$RDM_CONFIG_DIR/session.toml"
+fi
+
+# Copy labwc config if not present
+LABWC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/labwc"
+mkdir -p "$LABWC_DIR"
+if [ -f "$SCRIPT_DIR/../config/labwc-rc.xml" ] && [ ! -f "$LABWC_DIR/rc.xml" ]; then
+    cp "$SCRIPT_DIR/../config/labwc-rc.xml" "$LABWC_DIR/rc.xml"
+fi
+
+# labwc autostart file — launches rdm-session which manages everything else
+AUTOSTART="$LABWC_DIR/autostart"
+cat > "$AUTOSTART" << 'EOF'
+#!/bin/sh
+# RDM autostart — managed by rdm-start
+rdm-session &
+EOF
+chmod +x "$AUTOSTART"
+
+echo "Starting RDM Desktop (labwc compositor)..."
+exec labwc

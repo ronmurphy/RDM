@@ -1,0 +1,27 @@
+# RDM Session - Autostart entries
+# restart = true means the session manager will relaunch if it crashes
+
+[[autostart]]
+name = "rdm-watermark"
+command = "rdm-watermark"
+args = []
+restart = true
+
+[[autostart]]
+name = "rdm-panel"
+command = "rdm-panel"
+args = []
+restart = true
+
+[[autostart]]
+name = "swaybg"
+command = "swaybg"
+args = ["-c", "#1a1b26"]
+restart = false
+
+# Uncomment to auto-start the snap daemon:
+# [[autostart]]
+# name = "rdm-snap"
+# command = "rdm-snap"
+# args = []
+# restart = true
