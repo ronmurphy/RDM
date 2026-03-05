@@ -39,8 +39,10 @@ fn main() {
 fn build_daemon(app: &gtk4::Application) {
     load_css();
 
-    // Keep the app alive without a visible window
-    let _hold = app.hold();
+    // Keep the app alive without a visible window — leak the guard
+    // so it is never dropped (dropping it would let the app exit)
+    let hold = app.hold();
+    std::mem::forget(hold);
 
     let state = Rc::new(RefCell::new(NotificationState {
         next_id: 0,
@@ -61,7 +63,10 @@ fn build_daemon(app: &gtk4::Application) {
         dismiss_notification(&state_close, id);
     });
 
-    dbus::register_notification_service(next_id, on_notify, on_close);
+    // Hold onto the D-Bus handle — dropping it releases the bus name.
+    // Leak it so it persists for the entire program lifetime.
+    let dbus_handle = dbus::register_notification_service(next_id, on_notify, on_close);
+    std::mem::forget(dbus_handle);
 
     log::info!("Notification daemon ready");
 }

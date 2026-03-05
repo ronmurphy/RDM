@@ -57,18 +57,27 @@ pub type NotifyCallback = Rc<dyn Fn(Notification)>;
 /// Callback type for when CloseNotification is received
 pub type CloseCallback = Rc<dyn Fn(u32)>;
 
+/// Holds D-Bus resources that must remain alive for the notification service.
+/// Dropping this will release the bus name and unregister the object.
+pub struct NotificationServiceHandle {
+    _connection: gio::DBusConnection,
+    _registration_id: gio::RegistrationId,
+    _owner_id: gio::OwnerId,
+}
+
 /// Register the org.freedesktop.Notifications service on the session bus.
 /// Gets the bus synchronously, registers the object, then owns the name.
+/// Returns a handle that MUST be kept alive for the service to persist.
 pub fn register_notification_service(
     next_id: Rc<RefCell<u32>>,
     on_notify: NotifyCallback,
     on_close: CloseCallback,
-) {
+) -> Option<NotificationServiceHandle> {
     let connection = match gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
         Ok(c) => c,
         Err(e) => {
             log::error!("Failed to connect to session bus: {}", e);
-            return;
+            return None;
         }
     };
 
@@ -78,7 +87,7 @@ pub fn register_notification_service(
         .expect("Interface not found in XML");
 
     // Register object first, then claim the name
-    let reg = connection
+    let registration_id = match connection
         .register_object("/org/freedesktop/Notifications", &interface_info)
         .method_call(move |_conn, _sender, _path, _iface, method, params, invocation| {
             handle_method_call(
@@ -90,18 +99,20 @@ pub fn register_notification_service(
                 &on_close,
             );
         })
-        .build();
-
-    match reg {
-        Ok(_id) => log::info!("Registered D-Bus object at /org/freedesktop/Notifications"),
+        .build()
+    {
+        Ok(id) => {
+            log::info!("Registered D-Bus object at /org/freedesktop/Notifications");
+            id
+        }
         Err(e) => {
             log::error!("Failed to register D-Bus object: {}", e);
-            return;
+            return None;
         }
-    }
+    };
 
     // Now claim the well-known name
-    let _owner_id = gio::bus_own_name_on_connection(
+    let owner_id = gio::bus_own_name_on_connection(
         &connection,
         "org.freedesktop.Notifications",
         gio::BusNameOwnerFlags::REPLACE,
@@ -114,6 +125,12 @@ pub fn register_notification_service(
     );
 
     log::info!("Notification D-Bus service ready");
+
+    Some(NotificationServiceHandle {
+        _connection: connection,
+        _registration_id: registration_id,
+        _owner_id: owner_id,
+    })
 }
 
 fn handle_method_call(
