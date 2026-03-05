@@ -1,0 +1,15 @@
+[package]
+name = "rdm-notify"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rdm-notify"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { workspace = true }
+gtk4-layer-shell = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+rdm-common = { workspace = true }

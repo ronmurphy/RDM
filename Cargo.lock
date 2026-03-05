@@ -1116,6 +1116,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdm-notify"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "gtk4",
+ "gtk4-layer-shell",
+ "log",
+ "rdm-common",
+]
+
+[[package]]
 name = "rdm-panel"
 version = "0.1.0"
 dependencies = [

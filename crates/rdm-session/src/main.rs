@@ -39,6 +39,12 @@ impl Default for SessionConfig {
                     restart: true,
                 },
                 AutostartEntry {
+                    name: "rdm-notify".into(),
+                    command: "rdm-notify".into(),
+                    args: vec![],
+                    restart: true,
+                },
+                AutostartEntry {
                     name: "swaybg".into(),
                     command: "swaybg".into(),
                     args: vec!["-c".into(), "#1a1b26".into()],

@@ -346,3 +346,29 @@ stacksidebar row:selected {
     padding: 4px 8px;
     background-color: transparent;
 }
+
+/* ── Notifications ────────────────────────────────────────────── */
+.notification {
+    background-color: @theme_surface;
+    border: 1px solid @theme_border;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 4px 8px;
+}
+
+.notification-summary {
+    font-size: 13px;
+    font-weight: bold;
+    color: @theme_fg;
+}
+
+.notification-body {
+    font-size: 12px;
+    color: @theme_subtle;
+    margin-top: 4px;
+}
+
+.notification-app {
+    font-size: 10px;
+    color: @theme_muted;
+}
