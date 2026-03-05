@@ -92,8 +92,9 @@ info "Installing scripts..."
 sudo install -Dm755 scripts/rdm-start      "$PREFIX/bin/rdm-start"
 sudo install -Dm755 scripts/rdm-reload     "$PREFIX/bin/rdm-reload"
 sudo install -Dm755 scripts/rdm-screenshot "$PREFIX/bin/rdm-screenshot"
+sudo install -Dm755 scripts/rdm-volume     "$PREFIX/bin/rdm-volume"
 
-ok "rdm-start, rdm-reload, rdm-screenshot"
+ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume"
 
 # ─── Install session entry ─────────────────────────────────────
 

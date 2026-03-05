@@ -105,16 +105,16 @@
 
     <!-- ==================== Volume (multimedia keys) ==================== -->
     <keybind key="XF86AudioRaiseVolume">
-      <action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%%+" />
+      <action name="Execute" command="rdm-volume up" />
     </keybind>
     <keybind key="XF86AudioLowerVolume">
-      <action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%%-" />
+      <action name="Execute" command="rdm-volume down" />
     </keybind>
     <keybind key="XF86AudioMute">
-      <action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" />
+      <action name="Execute" command="rdm-volume mute" />
     </keybind>
     <keybind key="XF86AudioMicMute">
-      <action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle" />
+      <action name="Execute" command="rdm-volume mic-mute" />
     </keybind>
 
     <!-- ==================== Media playback ==================== -->

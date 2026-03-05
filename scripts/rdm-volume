@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# rdm-volume — Volume control with OSD notification via rdm-notify
+#
+# Usage:
+#   rdm-volume up       — Raise volume 5%
+#   rdm-volume down     — Lower volume 5%
+#   rdm-volume mute     — Toggle sink mute
+#   rdm-volume mic-mute — Toggle source (mic) mute
+#
+# Sends a notification with a fixed replaces_id so each change
+# updates the existing popup instead of stacking new ones.
+
+set -euo pipefail
+
+SINK="@DEFAULT_AUDIO_SINK@"
+SOURCE="@DEFAULT_AUDIO_SOURCE@"
+# Fixed notification ID so volume popups replace each other
+NOTIFY_ID=42042
+
+ACTION="${1:-up}"
+
+case "$ACTION" in
+    up)
+        wpctl set-volume "$SINK" 5%+
+        # Cap at 100%
+        wpctl set-volume "$SINK" --limit 1.0 5%+ 2>/dev/null || true
+        ;;
+    down)
+        wpctl set-volume "$SINK" 5%-
+        ;;
+    mute)
+        wpctl set-mute "$SINK" toggle
+        ;;
+    mic-mute)
+        wpctl set-mute "$SOURCE" toggle
+        ;;
+    *)
+        echo "Usage: rdm-volume {up|down|mute|mic-mute}" >&2
+        exit 1
+        ;;
+esac
+
+# ── Read current state ──────────────────────────────────────────
+
+# wpctl get-volume output: "Volume: 0.75" or "Volume: 0.75 [MUTED]"
+VOL_OUTPUT=$(wpctl get-volume "$SINK" 2>/dev/null || echo "Volume: 0.00")
+VOL_RAW=$(echo "$VOL_OUTPUT" | awk '{print $2}')
+IS_MUTED=$(echo "$VOL_OUTPUT" | grep -c "MUTED" || true)
+
+# Convert 0.75 → 75
+VOL_PCT=$(awk "BEGIN {printf \"%.0f\", $VOL_RAW * 100}")
+
+# ── Build visual bar ────────────────────────────────────────────
+
+BAR_LEN=20
+FILLED=$(( VOL_PCT * BAR_LEN / 100 ))
+EMPTY=$(( BAR_LEN - FILLED ))
+
+BAR=""
+for ((i=0; i<FILLED; i++)); do BAR+="█"; done
+for ((i=0; i<EMPTY; i++)); do BAR+="░"; done
+
+# ── Choose icon ─────────────────────────────────────────────────
+
+if [ "$ACTION" = "mic-mute" ]; then
+    MIC_OUTPUT=$(wpctl get-volume "$SOURCE" 2>/dev/null || echo "Volume: 0.00")
+    MIC_MUTED=$(echo "$MIC_OUTPUT" | grep -c "MUTED" || true)
+    if [ "$MIC_MUTED" -gt 0 ]; then
+        SUMMARY="🎙️ Microphone Muted"
+        BODY=""
+    else
+        SUMMARY="🎙️ Microphone On"
+        BODY=""
+    fi
+elif [ "$IS_MUTED" -gt 0 ]; then
+    SUMMARY="🔇 Muted"
+    BODY="$BAR  $VOL_PCT%"
+elif [ "$VOL_PCT" -eq 0 ]; then
+    SUMMARY="🔈 Volume"
+    BODY="$BAR  $VOL_PCT%"
+elif [ "$VOL_PCT" -le 50 ]; then
+    SUMMARY="🔉 Volume"
+    BODY="$BAR  $VOL_PCT%"
+else
+    SUMMARY="🔊 Volume"
+    BODY="$BAR  $VOL_PCT%"
+fi
+
+# ── Send notification with fixed replace ID ─────────────────────
+
+# Use dbus-send with replaces_id so rdm-notify replaces the popup
+dbus-send --session \
+    --dest=org.freedesktop.Notifications \
+    --type=method_call \
+    --print-reply=literal \
+    /org/freedesktop/Notifications \
+    org.freedesktop.Notifications.Notify \
+    string:"rdm-volume" \
+    uint32:$NOTIFY_ID \
+    string:"" \
+    string:"$SUMMARY" \
+    string:"$BODY" \
+    array:string:"" \
+    dict:string:variant: \
+    int32:2000 \
+    >/dev/null 2>&1 || true
