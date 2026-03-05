@@ -185,7 +185,7 @@ fn launch_app(exec: &str) {
 
     log::info!("Launching: {}", cmd);
 
-    if let Err(e) = std::process::Command::new("sh")
+    match std::process::Command::new("sh")
         .arg("-c")
         .arg(&cmd)
         .stdin(std::process::Stdio::null())
@@ -193,7 +193,12 @@ fn launch_app(exec: &str) {
         .stderr(std::process::Stdio::null())
         .spawn()
     {
-        log::error!("Failed to launch '{}': {}", cmd, e);
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(e) => log::error!("Failed to launch '{}': {}", cmd, e),
     }
 }
 

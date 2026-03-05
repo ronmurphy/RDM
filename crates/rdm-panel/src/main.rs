@@ -51,9 +51,14 @@ fn build_panel(app: &Application, config: &RdmConfig) {
     let launcher_btn = gtk4::Button::with_label("  Apps  ");
     launcher_btn.add_css_class("launcher-btn");
     launcher_btn.connect_clicked(|_| {
-        // Spawn rdm-launcher
-        if let Err(e) = std::process::Command::new("rdm-launcher").spawn() {
-            log::error!("Failed to launch rdm-launcher: {}", e);
+        // Spawn rdm-launcher and reap it in a background thread to avoid zombies
+        match std::process::Command::new("rdm-launcher").spawn() {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            Err(e) => log::error!("Failed to launch rdm-launcher: {}", e),
         }
     });
     hbox.append(&launcher_btn);
