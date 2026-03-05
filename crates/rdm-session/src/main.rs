@@ -213,5 +213,3 @@ fn load_session_config() -> SessionConfig {
         }
     }
 }
-    }
-}

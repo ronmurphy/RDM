@@ -19,6 +19,12 @@ command = "swaybg"
 args = ["-c", "#1a1b26"]
 restart = false
 
+[[autostart]]
+name = "mako"
+command = "mako"
+args = []
+restart = true
+
 # Uncomment to auto-start the snap daemon:
 # [[autostart]]
 # name = "rdm-snap"

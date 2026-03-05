@@ -1042,6 +1042,7 @@ dependencies = [
 name = "rdm-common"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dirs",
  "log",
  "serde",
@@ -1080,6 +1081,7 @@ name = "rdm-session"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "libc",
  "log",
  "nix",
  "rdm-common",
@@ -1101,6 +1103,17 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "rdm-watermark"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "gtk4",
+ "gtk4-layer-shell",
+ "log",
+ "rdm-common",
 ]
 
 [[package]]
