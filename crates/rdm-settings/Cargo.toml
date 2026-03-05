@@ -8,7 +8,8 @@ name = "rdm-settings"
 path = "src/main.rs"
 
 [dependencies]
-gtk4 = { workspace = true }
+qmetaobject = { workspace = true }
+qttypes = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 rdm-common = { workspace = true }

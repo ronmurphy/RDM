@@ -1,11 +1,14 @@
-# RDM — Rust Desktop Manager
+# RDM — Rust Desktop Manager (QML Edition)
 
 A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, and session management — all with a cohesive **Tokyo Night** color theme.
+
+The UI layer uses **Qt/QML** (via the `qmetaobject` Rust crate) with **layer-shell-qt** for Wayland layer-shell integration, while all business logic remains in pure Rust.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Rust](https://img.shields.io/badge/rust-2021_edition-orange)
 ![Wayland](https://img.shields.io/badge/display-Wayland-blueviolet)
 ![Compositor](https://img.shields.io/badge/compositor-labwc-green)
+![UI](https://img.shields.io/badge/UI-Qt%2FQML-41cd52)
 
 ---
 
@@ -18,7 +21,7 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 ## What It Does
 
 - **Panel/Taskbar** — Top (or bottom) bar with app launcher button, running-window taskbar, clock, and system tray. Three taskbar modes:
-  - **Icons** — GTK icon theme icons for each open window
+  - **Icons** — Nerd Font glyphs based on app_id (icon theme independent)
   - **Nerd** — Nerd Font glyphs (terminal, browser, editor, etc.)
   - **Text** — Window title buttons (classic style)
 - **App Launcher** — Overlay search dialog (Super key) that scans `.desktop` files and launches apps
@@ -27,7 +30,7 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
   - WiFi submenu — scans networks via NetworkManager, connect to known/new networks with password dialog
   - Session controls — Lock, Logout, Reboot, Shutdown
 - **Wallpaper** — Managed via `swaybg`, configurable through the settings app (image path, fill mode, solid color fallback)
-- **Settings App** — GTK4 GUI to configure panel options (taskbar mode, position, height, clock) and wallpaper (image, mode, background color). Changes apply via hot reload.
+- **Settings App** — QML GUI to configure panel options (taskbar mode, position, height, clock) and wallpaper (image, mode, background color). Changes apply via hot reload.
 - **Hot Reload** — Rebuild any component, run `rdm-reload`, and see changes instantly without restarting the compositor or losing your windows
 - **Session Manager** — Manages autostart processes, automatic crash recovery, PID tracking, SIGUSR1-driven hot reload
 - **Version Watermark** — Subtle build version label on the desktop (layer-shell bottom)
@@ -57,7 +60,7 @@ RDM is a Cargo workspace with 7 crates:
 | `rdm-session` | `rdm-session` | Process manager — starts/stops/restarts all shell components, handles hot reload via SIGUSR1 |
 | `rdm-panel` | `rdm-panel` | Panel bar — taskbar, clock, system tray (battery, wifi, power), launcher button |
 | `rdm-launcher` | `rdm-launcher` | Overlay app launcher — searches `.desktop` files, keyboard-driven |
-| `rdm-settings` | `rdm-settings` | GTK4 settings GUI — panel config + wallpaper config |
+| `rdm-settings` | `rdm-settings` | QML settings GUI — panel config + wallpaper config |
 | `rdm-watermark` | `rdm-watermark` | Version watermark on desktop background |
 | `rdm-snap` | `rdm-snap` | Snap daemon (stub — labwc handles snapping natively for now) |
 | `rdm-common` | *(library)* | Shared config types, load/save, build info |
@@ -71,6 +74,7 @@ RDM is a Cargo workspace with 7 crates:
 | [mako](https://github.com/emersion/mako) | Notification daemon |
 | [swaylock](https://github.com/swaywm/swaylock) | Screen locker |
 | [foot](https://codeberg.org/dnkl/foot) | Default terminal emulator |
+| [layer-shell-qt](https://invent.kde.org/plasma/layer-shell-qt) | Qt/QML layer-shell integration for Wayland |
 | NetworkManager | WiFi management (via `nmcli`) |
 
 ### How It Starts
@@ -107,8 +111,8 @@ labwc config lives in `~/.config/labwc/rc.xml` (keybindings, snapping, theme).
 # Compositor and Wayland tools
 sudo pacman -S labwc swaybg swaylock mako foot
 
-# Build dependencies
-sudo pacman -S rust cargo gtk4 gtk4-layer-shell
+# Build dependencies (Qt/QML + Rust)
+sudo pacman -S rust cargo qt6-base qt6-declarative qt6-wayland layer-shell-qt
 
 # Runtime dependencies
 sudo pacman -S networkmanager

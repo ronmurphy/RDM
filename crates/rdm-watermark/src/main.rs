@@ -1,6 +1,45 @@
-use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, CssProvider, Label};
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use qmetaobject::prelude::*;
+use std::cell::RefCell;
+
+/// QML UI for the version watermark — a transparent bottom-layer surface in the
+/// bottom-right corner of the desktop.  Layer-shell integration is provided by
+/// the `org.kde.layershell` QML module (from `layer-shell-qt`).
+const WATERMARK_QML: &str = r#"
+import QtQuick 2.15
+import QtQuick.Window 2.15
+import org.kde.layershell 1.0 as LayerShell
+
+Window {
+    id: root
+    visible: true
+    width: 200
+    height: 30
+    color: "transparent"
+
+    // Layer-shell: bottom layer, anchored to bottom-right, no exclusive zone
+    LayerShell.Window.scope: "rdm-watermark"
+    LayerShell.Window.layer: LayerShell.Window.LayerBottom
+    LayerShell.Window.anchors: LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorRight
+    LayerShell.Window.exclusionZone: 0
+    LayerShell.Window.bottomMargin: 8
+    LayerShell.Window.rightMargin: 12
+
+    Text {
+        anchors.centerIn: parent
+        text: _backend.versionText
+        color: Qt.rgba(1, 1, 1, 0.25)
+        font.family: "Inter"
+        font.pixelSize: 11
+    }
+}
+"#;
+
+#[derive(QObject, Default)]
+struct WatermarkBackend {
+    base: qt_base_class!(trait QObject),
+    version_text: qt_property!(QString; NOTIFY version_changed),
+    version_changed: qt_signal!(),
+}
 
 fn main() {
     env_logger::init();
@@ -9,70 +48,18 @@ fn main() {
     let version = rdm_common::build_version_string();
     log::info!("Version: {}", version);
 
-    let app = Application::builder()
-        .application_id("org.rdm.watermark")
-        .build();
+    // Enable layer-shell integration for Wayland
+    std::env::set_var("QT_WAYLAND_SHELL_INTEGRATION", "layer-shell");
 
-    app.connect_activate(move |app| build_watermark(app, &version));
-    app.run();
-}
+    let backend = RefCell::new(WatermarkBackend {
+        version_text: QString::from(version.as_str()),
+        ..Default::default()
+    });
 
-fn build_watermark(app: &Application, version: &str) {
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title("RDM Watermark")
-        .default_width(1)
-        .default_height(1)
-        .build();
-
-    // Layer shell: Bottom layer — sits above wallpaper but below all windows
-    window.init_layer_shell();
-    window.set_layer(Layer::Bottom);
-    window.set_namespace("rdm-watermark");
-
-    // Anchor to bottom-right corner
-    window.set_anchor(Edge::Bottom, true);
-    window.set_anchor(Edge::Right, true);
-    window.set_anchor(Edge::Top, false);
-    window.set_anchor(Edge::Left, false);
-
-    // Don't reserve any space
-    window.set_exclusive_zone(0);
-
-    // Margin from edges
-    window.set_margin(Edge::Bottom, 8);
-    window.set_margin(Edge::Right, 12);
-
-    let label = Label::new(Some(version));
-    label.add_css_class("watermark");
-
-    window.set_child(Some(&label));
-
-    load_css();
-    window.present();
-}
-
-fn load_css() {
-    let css = CssProvider::new();
-    css.load_from_data(
-        r#"
-        window.background {
-            background-color: transparent;
-        }
-
-        .watermark {
-            color: rgba(255, 255, 255, 0.25);
-            font-family: "Inter", "Noto Sans Mono", monospace;
-            font-size: 11px;
-            padding: 4px 8px;
-            background-color: transparent;
-        }
-    "#,
-    );
-
-    gtk4::style_context_add_provider_for_display(
-        &gtk4::gdk::Display::default().expect("No display"),
-        &css,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    let mut engine = QmlEngine::new();
+    // SAFETY: `backend` lives on the stack and outlives `engine.exec()` which
+    // blocks until the QML application exits, so the pinned reference is valid.
+    engine.set_object_property("_backend".into(), unsafe { QObjectPinned::new(&backend) });
+    engine.load_data(WATERMARK_QML.into());
+    engine.exec();
 }

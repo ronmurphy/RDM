@@ -1,5 +1,5 @@
 #!/bin/bash
-# install.sh — Build and install RDM Desktop Environment
+# install.sh — Build and install RDM Desktop Environment (QML edition)
 # Usage: ./install.sh
 # Requires: rust/cargo, sudo access
 
@@ -20,7 +20,7 @@ err()   { echo -e "${RED}  ✗ $1${NC}"; }
 
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════╗"
-echo "  ║     RDM Desktop — Installer          ║"
+echo "  ║     RDM Desktop — Installer (QML)    ║"
 echo "  ║     Rust Desktop Manager for Wayland  ║"
 echo "  ╚══════════════════════════════════════╝"
 echo -e "${NC}"
@@ -37,23 +37,33 @@ command -v swaybg >/dev/null 2>&1 || missing+=("swaybg")
 command -v mako   >/dev/null 2>&1 || missing+=("mako")
 command -v foot   >/dev/null 2>&1 || missing+=("foot")
 
-if pkg-config --exists gtk4 2>/dev/null; then
-    ok "gtk4"
-else
-    missing+=("gtk4")
+# Check for Qt (try Qt6 first, then Qt5)
+qt_found=false
+if pkg-config --exists Qt6Quick 2>/dev/null; then
+    ok "Qt6 Quick"
+    qt_found=true
+elif pkg-config --exists Qt5Quick 2>/dev/null; then
+    ok "Qt5 Quick"
+    qt_found=true
 fi
 
-if pkg-config --exists gtk4-layer-shell-0 2>/dev/null; then
-    ok "gtk4-layer-shell"
+if ! $qt_found; then
+    missing+=("qt6-declarative (Qt Quick/QML)")
+fi
+
+# layer-shell-qt: pkg-config name varies by distro and Qt version
+# Arch/KDE Plasma 6: "LayerShellQt", some older builds: "LayerShellQtInterface"
+if pkg-config --exists LayerShellQt 2>/dev/null || pkg-config --exists LayerShellQtInterface 2>/dev/null; then
+    ok "layer-shell-qt"
 else
-    missing+=("gtk4-layer-shell")
+    missing+=("layer-shell-qt")
 fi
 
 if [ ${#missing[@]} -gt 0 ]; then
     err "Missing dependencies: ${missing[*]}"
     echo ""
     echo "  Install on Arch Linux:"
-    echo "    sudo pacman -S labwc swaybg swaylock mako foot rust gtk4 gtk4-layer-shell networkmanager"
+    echo "    sudo pacman -S labwc swaybg swaylock mako foot rust qt6-base qt6-declarative qt6-wayland layer-shell-qt networkmanager"
     echo ""
     echo "  Then re-run this script."
     exit 1

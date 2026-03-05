@@ -1,179 +1,224 @@
-use gtk4::prelude::*;
-use gtk4::{
-    Application, ApplicationWindow, CssProvider, Entry, Label, ListBox, ListBoxRow,
-    Orientation, ScrolledWindow,
-};
-use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
-use rdm_common::config::RdmConfig;
-use std::rc::Rc;
+use qmetaobject::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 mod desktop_apps;
 
-fn main() {
-    env_logger::init();
-    log::info!("Starting RDM Launcher");
+// ─── QML UI ──────────────────────────────────────────────────────
 
-    let config = RdmConfig::load();
+/// QML overlay launcher with layer-shell.  Provides a search box + scrollable
+/// list of `.desktop` applications.  Escape key closes the launcher.
+const LAUNCHER_QML: &str = r#"
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Window 2.15
+import org.kde.layershell 1.0 as LayerShell
 
-    let app = Application::builder()
-        .application_id("org.rdm.launcher")
-        .build();
+Window {
+    id: root
+    visible: true
+    width: _backend.launcherWidth
+    height: _backend.launcherHeight
+    color: "transparent"
 
-    let cfg = config.clone();
-    app.connect_activate(move |app| build_launcher(app, &cfg));
-    app.run();
-}
+    LayerShell.Window.scope: "rdm-launcher"
+    LayerShell.Window.layer: LayerShell.Window.LayerOverlay
+    LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityExclusive
 
-fn build_launcher(app: &Application, config: &RdmConfig) {
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title("RDM Launcher")
-        .default_width(config.launcher.width)
-        .default_height(config.launcher.height)
-        .build();
+    Rectangle {
+        anchors.fill: parent
+        radius: 12
+        color: "#1a1b26"
 
-    // Layer shell setup — overlay that grabs keyboard
-    window.init_layer_shell();
-    window.set_layer(Layer::Overlay);
-    window.set_namespace("rdm-launcher");
-    window.set_keyboard_mode(KeyboardMode::Exclusive);
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 8
 
-    // Main vertical layout
-    let vbox = gtk4::Box::new(Orientation::Vertical, 8);
-    vbox.set_margin_top(16);
-    vbox.set_margin_bottom(16);
-    vbox.set_margin_start(16);
-    vbox.set_margin_end(16);
-    vbox.add_css_class("launcher");
+            Text {
+                text: "Launch Application"
+                color: "#7aa2f7"
+                font.pixelSize: 18
+                font.bold: true
+            }
 
-    // Title
-    let title = Label::new(Some("Launch Application"));
-    title.add_css_class("launcher-title");
-    vbox.append(&title);
-
-    // Search entry
-    let search_entry = Entry::new();
-    search_entry.set_placeholder_text(Some("Type to search..."));
-    search_entry.add_css_class("launcher-search");
-    vbox.append(&search_entry);
-
-    // Results list
-    let scrolled = ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-
-    let list_box = ListBox::new();
-    list_box.add_css_class("launcher-list");
-    scrolled.set_child(Some(&list_box));
-    vbox.append(&scrolled);
-
-    // Load desktop entries
-    let entries = Rc::new(desktop_apps::load_desktop_entries());
-    log::info!("Loaded {} desktop entries", entries.len());
-
-    // Populate initial list
-    populate_list(&list_box, &entries, "");
-
-    // Filter on search
-    let list_box_clone = list_box.clone();
-    let entries_clone = entries.clone();
-    search_entry.connect_changed(move |entry| {
-        let query = entry.text().to_string().to_lowercase();
-        populate_list(&list_box_clone, &entries_clone, &query);
-    });
-
-    // Activate (Enter) launches selected app
-    let app_handle = app.clone();
-    let entries_for_activate = entries.clone();
-
-    list_box.connect_row_activated(move |_, row| {
-        let idx = row.index() as usize;
-        if let Some(entry) = filtered_entries(&entries_for_activate, "").get(idx) {
-            launch_app(&entry.exec);
-            app_handle.quit();
-        }
-    });
-
-    // Escape closes
-    let app_for_key = app.clone();
-    let key_controller = gtk4::EventControllerKey::new();
-    key_controller.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk4::gdk::Key::Escape {
-            app_for_key.quit();
-            return gtk4::glib::Propagation::Stop;
-        }
-        gtk4::glib::Propagation::Proceed
-    });
-    window.add_controller(key_controller);
-
-    window.set_child(Some(&vbox));
-
-    load_css();
-
-    window.present();
-    search_entry.grab_focus();
-}
-
-fn populate_list(list_box: &ListBox, entries: &[desktop_apps::AppEntry], query: &str) {
-    // Remove existing rows
-    while let Some(child) = list_box.first_child() {
-        list_box.remove(&child);
-    }
-
-    let filtered = filtered_entries(entries, query);
-    for entry in filtered.iter().take(50) {
-        let row = ListBoxRow::new();
-        let hbox = gtk4::Box::new(Orientation::Horizontal, 8);
-        hbox.set_margin_top(4);
-        hbox.set_margin_bottom(4);
-        hbox.set_margin_start(8);
-        hbox.set_margin_end(8);
-
-        let name_label = Label::new(Some(&entry.name));
-        name_label.add_css_class("app-name");
-        hbox.append(&name_label);
-
-        if let Some(ref comment) = entry.comment {
-            let comment_label = Label::new(Some(comment));
-            comment_label.add_css_class("app-comment");
-            comment_label.set_hexpand(true);
-            comment_label.set_halign(gtk4::Align::End);
-            hbox.append(&comment_label);
-        }
-
-        row.set_child(Some(&hbox));
-
-        // Store exec command for activation
-        let exec = entry.exec.clone();
-        let list_box_clone = list_box.clone();
-        row.connect_activate(move |_| {
-            launch_app(&exec);
-            if let Some(root) = list_box_clone.root() {
-                if let Some(window) = root.downcast_ref::<gtk4::Window>() {
-                    window.close();
+            TextField {
+                id: searchField
+                Layout.fillWidth: true
+                placeholderText: "Type to search..."
+                color: "#c0caf5"
+                placeholderTextColor: "#565f89"
+                font.pixelSize: 14
+                background: Rectangle {
+                    color: "#24283b"
+                    border.color: "#3b4261"
+                    border.width: 1
+                    radius: 8
+                }
+                padding: 8
+                onTextChanged: _appModel.filterText = text
+                Keys.onEscapePressed: Qt.quit()
+                Component.onCompleted: forceActiveFocus()
+                Keys.onReturnPressed: {
+                    if (appList.count > 0) {
+                        _appModel.launch(0)
+                        Qt.quit()
+                    }
                 }
             }
-        });
 
-        list_box.append(&row);
+            ListView {
+                id: appList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                model: _appModel
+                clip: true
+                currentIndex: 0
+                highlight: Rectangle { color: "#292e42"; radius: 6 }
+                highlightFollowsCurrentItem: true
+
+                delegate: Item {
+                    width: appList.width
+                    height: 36
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            _appModel.launch(index)
+                            Qt.quit()
+                        }
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 8
+
+                        Text {
+                            text: model.name
+                            color: "#c0caf5"
+                            font.pixelSize: 13
+                        }
+                        Text {
+                            text: model.comment
+                            color: "#565f89"
+                            font.pixelSize: 11
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                Keys.onUpPressed: decrementCurrentIndex()
+                Keys.onDownPressed: incrementCurrentIndex()
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        onActivated: Qt.quit()
+    }
+}
+"#;
+
+// ─── App List Model ──────────────────────────────────────────────
+
+const QT_USER_ROLE: i32 = 0x0100;
+const ROLE_NAME: i32 = QT_USER_ROLE + 1;
+const ROLE_COMMENT: i32 = QT_USER_ROLE + 2;
+const ROLE_EXEC: i32 = QT_USER_ROLE + 3;
+
+#[derive(QObject, Default)]
+struct AppListModel {
+    base: qt_base_class!(trait QAbstractListModel),
+    all_entries: Vec<desktop_apps::AppEntry>,
+    filtered: Vec<usize>,
+    filter_text: qt_property!(QString; WRITE set_filter_text),
+    launch: qt_method!(fn(&self, index: i32)),
+}
+
+impl AppListModel {
+    fn set_filter_text(&mut self, text: QString) {
+        let query = text.to_string().to_lowercase();
+        (self as &dyn QAbstractListModel).begin_reset_model();
+        if query.is_empty() {
+            self.filtered = (0..self.all_entries.len()).collect();
+        } else {
+            self.filtered = self
+                .all_entries
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    e.name.to_lowercase().contains(&query)
+                        || e.comment
+                            .as_ref()
+                            .map(|c| c.to_lowercase().contains(&query))
+                            .unwrap_or(false)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+        // Limit to 50 results
+        self.filtered.truncate(50);
+        (self as &dyn QAbstractListModel).end_reset_model();
+    }
+
+    fn launch(&self, index: i32) {
+        if let Some(&entry_idx) = self.filtered.get(index as usize) {
+            if let Some(entry) = self.all_entries.get(entry_idx) {
+                launch_app(&entry.exec);
+            }
+        }
     }
 }
 
-fn filtered_entries(entries: &[desktop_apps::AppEntry], query: &str) -> Vec<desktop_apps::AppEntry> {
-    if query.is_empty() {
-        return entries.to_vec();
+impl QAbstractListModel for AppListModel {
+    fn row_count(&self) -> i32 {
+        self.filtered.len() as i32
     }
-    entries
-        .iter()
-        .filter(|e| {
-            e.name.to_lowercase().contains(query)
-                || e.comment
-                    .as_ref()
-                    .map(|c| c.to_lowercase().contains(query))
-                    .unwrap_or(false)
-        })
-        .cloned()
-        .collect()
+
+    fn data(&self, index: QModelIndex, role: i32) -> QVariant {
+        let row = index.row() as usize;
+        let entry_idx = match self.filtered.get(row) {
+            Some(&i) => i,
+            None => return QVariant::default(),
+        };
+        let entry = match self.all_entries.get(entry_idx) {
+            Some(e) => e,
+            None => return QVariant::default(),
+        };
+        match role {
+            ROLE_NAME => QString::from(entry.name.as_str()).into(),
+            ROLE_COMMENT => QString::from(entry.comment.as_deref().unwrap_or("")).into(),
+            ROLE_EXEC => QString::from(entry.exec.as_str()).into(),
+            _ => QVariant::default(),
+        }
+    }
+
+    fn role_names(&self) -> HashMap<i32, QByteArray> {
+        let mut map = HashMap::new();
+        map.insert(ROLE_NAME, "name".into());
+        map.insert(ROLE_COMMENT, "comment".into());
+        map.insert(ROLE_EXEC, "exec".into());
+        map
+    }
 }
+
+// ─── Launcher Backend ────────────────────────────────────────────
+
+#[derive(QObject, Default)]
+struct LauncherBackend {
+    base: qt_base_class!(trait QObject),
+    launcher_width: qt_property!(i32; NOTIFY config_changed),
+    launcher_height: qt_property!(i32; NOTIFY config_changed),
+    config_changed: qt_signal!(),
+}
+
+// ─── App Launching ───────────────────────────────────────────────
 
 fn launch_app(exec: &str) {
     // Strip field codes like %f, %u, %F, %U from Exec line
@@ -202,61 +247,39 @@ fn launch_app(exec: &str) {
     }
 }
 
-fn load_css() {
-    let css = CssProvider::new();
-    css.load_from_data(
-        r#"
-        .launcher {
-            background-color: #1a1b26;
-            border-radius: 12px;
-            color: #c0caf5;
-        }
+// ─── Main ────────────────────────────────────────────────────────
 
-        .launcher-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: #7aa2f7;
-            margin-bottom: 4px;
-        }
+fn main() {
+    env_logger::init();
+    log::info!("Starting RDM Launcher");
 
-        .launcher-search {
-            background-color: #24283b;
-            color: #c0caf5;
-            border: 1px solid #3b4261;
-            border-radius: 8px;
-            padding: 8px 12px;
-            font-size: 14px;
-        }
+    let config = rdm_common::config::RdmConfig::load();
 
-        .launcher-list {
-            background-color: transparent;
-        }
+    // Enable layer-shell integration for Wayland
+    std::env::set_var("QT_WAYLAND_SHELL_INTEGRATION", "layer-shell");
 
-        .launcher-list row {
-            background-color: transparent;
-            border-radius: 6px;
-            margin: 1px 0;
-        }
+    // Load desktop entries
+    let entries = desktop_apps::load_desktop_entries();
+    log::info!("Loaded {} desktop entries", entries.len());
 
-        .launcher-list row:selected {
-            background-color: #292e42;
-        }
+    let filtered: Vec<usize> = (0..entries.len()).collect();
+    let model = RefCell::new(AppListModel {
+        all_entries: entries,
+        filtered,
+        ..Default::default()
+    });
 
-        .app-name {
-            font-size: 13px;
-            color: #c0caf5;
-        }
+    let backend = RefCell::new(LauncherBackend {
+        launcher_width: config.launcher.width,
+        launcher_height: config.launcher.height,
+        ..Default::default()
+    });
 
-        .app-comment {
-            font-size: 11px;
-            color: #565f89;
-        }
-    "#,
-    );
-
-    gtk4::style_context_add_provider_for_display(
-        &gtk4::gdk::Display::default().expect("No display"),
-        &css,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    let mut engine = QmlEngine::new();
+    // SAFETY: All RefCell objects live on the stack and outlive `engine.exec()`
+    // which blocks until the QML application exits, so pinned references are valid.
+    engine.set_object_property("_appModel".into(), unsafe { QObjectPinned::new(&model) });
+    engine.set_object_property("_backend".into(), unsafe { QObjectPinned::new(&backend) });
+    engine.load_data(LAUNCHER_QML.into());
+    engine.exec();
 }

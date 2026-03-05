@@ -1,22 +1,10 @@
+// Clock module — formatting logic extracted for the QML panel.
+// The actual timer is handled by a QML Timer that calls
+// PanelBackend::update_clock() every second.
+
 use chrono::Local;
-use gtk4::Label;
 
-pub fn setup_clock(label: &Label, format: &str) {
-    let fmt = format.to_string();
-    let update = {
-        let label = label.clone();
-        let fmt = fmt.clone();
-        move || {
-            let now = Local::now();
-            label.set_label(&now.format(&fmt).to_string());
-            gtk4::glib::ControlFlow::Continue
-        }
-    };
-
-    // Initial update
-    let now = Local::now();
-    label.set_label(&now.format(&fmt).to_string());
-
-    // Update every second
-    gtk4::glib::timeout_add_seconds_local(1, update);
+/// Format the current time using the given format string.
+pub fn format_now(format: &str) -> String {
+    Local::now().format(format).to_string()
 }
