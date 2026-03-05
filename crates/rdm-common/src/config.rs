@@ -14,6 +14,8 @@ pub struct RdmConfig {
     #[serde(default)]
     pub wallpaper: WallpaperConfig,
     #[serde(default)]
+    pub menu: MenuConfig,
+    #[serde(default)]
     pub displays: Vec<DisplayConfig>,
 }
 
@@ -48,6 +50,12 @@ pub struct SnapConfig {
     pub edge_threshold: i32,
     #[serde(default = "default_true")]
     pub show_preview: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MenuConfig {
+    #[serde(default)]
+    pub favorites: Vec<String>,
 }
 
 fn default_panel_height() -> i32 { 32 }
@@ -115,6 +123,14 @@ impl Default for SnapConfig {
     }
 }
 
+impl Default for MenuConfig {
+    fn default() -> Self {
+        Self {
+            favorites: Vec::new(),
+        }
+    }
+}
+
 impl Default for RdmConfig {
     fn default() -> Self {
         Self {
@@ -122,6 +138,7 @@ impl Default for RdmConfig {
             launcher: LauncherConfig::default(),
             snap: SnapConfig::default(),
             wallpaper: WallpaperConfig::default(),
+            menu: MenuConfig::default(),
             displays: Vec::new(),
         }
     }

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod desktop_apps;
 pub mod display;
 
 pub const APP_NAME: &str = "RDM";

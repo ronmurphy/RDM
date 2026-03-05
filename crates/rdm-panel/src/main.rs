@@ -8,7 +8,6 @@ use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -37,8 +36,8 @@ fn build_panel(app: &Application, config: &RdmConfig) {
     let action_tx = Rc::new(action_tx);
 
     // Track active panel windows by connector name
-    let windows: Rc<RefCell<HashMap<String, ApplicationWindow>>> =
-        Rc::new(RefCell::new(HashMap::new()));
+    let windows: Rc<std::cell::RefCell<HashMap<String, ApplicationWindow>>> =
+        Rc::new(std::cell::RefCell::new(HashMap::new()));
 
     // Create panel for each connected monitor
     for i in 0..monitors.n_items() {
@@ -100,12 +99,16 @@ fn build_panel_window(
     let hbox = gtk4::Box::new(Orientation::Horizontal, 0);
     hbox.add_css_class("panel");
 
-    // Left: launcher button
+    // Left: launcher button → spawns rdm-launcher
     let launcher_btn = gtk4::Button::with_label("  Apps  ");
     launcher_btn.add_css_class("launcher-btn");
     launcher_btn.connect_clicked(|_| {
-        // Spawn rdm-launcher and reap it in a background thread to avoid zombies
-        match std::process::Command::new("rdm-launcher").spawn() {
+        match std::process::Command::new("rdm-launcher")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
             Ok(mut child) => {
                 std::thread::spawn(move || {
                     let _ = child.wait();
