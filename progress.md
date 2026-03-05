@@ -16,6 +16,7 @@ This document is a developer-facing reference for how RDM is built, what each co
   - [System Tray (tray.rs)](#system-tray-trayrs)
   - [WiFi (wifi.rs)](#wifi-wifirs)
 - [rdm-launcher — App Launcher](#rdm-launcher--app-launcher)
+- [rdm-notify — Notification Daemon](#rdm-notify--notification-daemon)
 - [rdm-watermark — Version Watermark](#rdm-watermark--version-watermark)
 - [rdm-settings — Settings GUI](#rdm-settings--settings-gui)
 - [rdm-snap — Snap Daemon (Stub)](#rdm-snap--snap-daemon-stub)
@@ -29,7 +30,7 @@ This document is a developer-facing reference for how RDM is built, what each co
 
 ## Overview
 
-RDM (Rust Desktop Manager) is a Wayland desktop environment that runs on top of **labwc**, a wlroots-based compositor. The project is a Cargo workspace with 7 crates — 6 binaries and 1 shared library.
+RDM (Rust Desktop Manager) is a Wayland desktop environment that runs on top of **labwc**, a wlroots-based compositor. The project is a Cargo workspace with 8 crates — 7 binaries and 1 shared library.
 
 All GUI components use **GTK4** with **gtk4-layer-shell** to create shell surfaces (panels, overlays, desktop widgets). The taskbar uses the **wlr-foreign-toplevel-management** Wayland protocol directly via `wayland-client` to track open windows.
 
@@ -50,7 +51,8 @@ RDM/
 ├── scripts/
 │   ├── rdm-install            # Legacy install script (see install.sh)
 │   ├── rdm-start              # Session entry point — sets env, execs labwc
-│   └── rdm-reload             # Sends SIGUSR1 to rdm-session for hot reload
+│   ├── rdm-reload             # Sends SIGUSR1 to rdm-session for hot reload
+│   └── rdm-screenshot         # Multi-monitor screenshot tool (grim + slurp)
 ├── install.sh                 # Main install script
 ├── uninstall.sh               # Uninstall script
 ├── crates/
@@ -58,6 +60,7 @@ RDM/
 │   ├── rdm-session/           # Session/process manager (tokio async)
 │   ├── rdm-panel/             # Panel bar (taskbar, clock, tray, wifi)
 │   ├── rdm-launcher/          # Overlay app launcher
+│   ├── rdm-notify/            # Notification daemon (freedesktop D-Bus)
 │   ├── rdm-watermark/         # Desktop version watermark
 │   ├── rdm-settings/          # GTK4 settings app
 │   └── rdm-snap/              # Window snap daemon (stub)
@@ -104,7 +107,7 @@ Sets `RDM_BUILD_DATE` environment variable at compile time using `chrono`, consu
 The session manager is the first process launched inside the labwc compositor (via the `autostart` file written by `rdm-start`). It:
 
 1. Reads `~/.config/rdm/session.toml` for the autostart list
-2. Spawns each process (rdm-panel, rdm-watermark, swaybg, mako, etc.)
+2. Spawns each process (rdm-panel, rdm-watermark, rdm-notify, swaybg, etc.)
 3. Monitors children — restarts crashed processes marked `restart = true`
 4. Listens for SIGUSR1 — on receipt, stops all children, waits 800ms for surfaces to release, reloads config, restarts everything
 
@@ -208,7 +211,41 @@ An overlay layer-shell surface (`Layer::Overlay`) with exclusive keyboard grab. 
 - Strips `%f`, `%u`, `%F`, `%U` field codes from Exec lines before launching
 - Spawns processes with zombie reaping via background thread
 
-The launcher is opened by the panel's "Apps" button (spawns `rdm-launcher` process) or by the Super key (labwc keybinding in `rc.xml`).
+The launcher is opened by the panel's "Apps" button (spawns `rdm-launcher` process) or by tapping the Super key (labwc keybinding in `rc.xml` fires on release so Super+key combos aren't intercepted).
+
+---
+
+## rdm-notify — Notification Daemon
+
+**Path:** `crates/rdm-notify/`
+**Binary:** `rdm-notify`
+**Modules:** main.rs, dbus.rs
+
+A native notification daemon that implements the **org.freedesktop.Notifications** D-Bus interface. Replaces external daemons like mako or dunst.
+
+### D-Bus Integration (dbus.rs)
+
+- Connects to the session bus via `gio::bus_get_sync()`
+- Registers an object at `/org/freedesktop/Notifications` implementing:
+  - `Notify` — receives notification (app_name, summary, body, timeout), assigns IDs, calls GTK callback
+  - `CloseNotification` — programmatic dismissal
+  - `GetCapabilities` — returns `["body"]`
+  - `GetServerInformation` — returns `rdm-notify / RDM / 0.1 / 1.2`
+- Owns the bus name `org.freedesktop.Notifications` with `REPLACE` flag
+- D-Bus activation service file allows auto-start if rdm-notify isn't already running
+
+### Notification Display (main.rs)
+
+- Each notification creates a new GTK4 layer-shell window on `Layer::Overlay`
+- Anchored to top-right corner, stacked vertically with 8px gaps
+- Shows app name, summary, and body text with theme CSS classes
+- Click-to-dismiss gesture handler
+- Auto-dismiss timeout (default 5 seconds, respects per-notification timeout)
+- `restack()` repositions all visible notifications when one is dismissed
+
+### Lifetime Management
+
+The GTK application hold guard and D-Bus service handle are both leaked via `std::mem::forget()` to ensure they persist for the entire program lifetime. Without this, the app would exit immediately since there are no visible windows, and the bus name would be released.
 
 ---
 
@@ -358,13 +395,14 @@ RDM connects to this protocol in a **separate thread** from GTK, using its own `
 
 ## Future Work
 
-- [ ] Volume / audio controls in tray (PipeWire/PulseAudio)
 - [ ] Brightness slider in tray
 - [ ] Visual snap zone preview overlays
 - [ ] Workspace indicator widget in panel
 - [ ] Multi-monitor support in settings
 - [ ] Configurable theme / user CSS override
 - [ ] Taskbar pinned apps
-- [ ] Screenshot / screen recording integration
+- [ ] Screen recording integration
 - [ ] Auto-detect battery path (iterate `/sys/class/power_supply/`)
 - [ ] Proper freedesktop session management (logout inhibit, etc.)
+- [ ] Notification actions (button callbacks)
+- [ ] Notification history / notification center

@@ -41,8 +41,10 @@ BINARIES=(
     rdm-snap
     rdm-watermark
     rdm-settings
+    rdm-notify
     rdm-start
     rdm-reload
+    rdm-screenshot
 )
 
 for bin in "${BINARIES[@]}"; do
@@ -59,6 +61,16 @@ info "Removing session entry..."
 if [ -f /usr/share/wayland-sessions/rdm.desktop ]; then
     sudo rm -f /usr/share/wayland-sessions/rdm.desktop
     ok "Removed /usr/share/wayland-sessions/rdm.desktop"
+fi
+
+# ─── Remove D-Bus service ─────────────────────────────────────────
+
+info "Removing D-Bus service file..."
+
+DBUS_SERVICE="${XDG_DATA_HOME:-$HOME/.local/share}/dbus-1/services/org.freedesktop.Notifications.service"
+if [ -f "$DBUS_SERVICE" ]; then
+    rm -f "$DBUS_SERVICE"
+    ok "Removed $DBUS_SERVICE"
 fi
 
 # ─── Done ───────────────────────────────────────────────────────

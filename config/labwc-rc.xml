@@ -33,7 +33,7 @@
     </keybind>
 
     <!-- Terminal -->
-    <keybind key="S-Return">
+    <keybind key="W-Return">
       <action name="Execute" command="foot" />
     </keybind>
 

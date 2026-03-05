@@ -32,11 +32,12 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 - **Session Manager** — Manages autostart processes, automatic crash recovery, PID tracking, SIGUSR1-driven hot reload
 - **Version Watermark** — Subtle build version label on the desktop (layer-shell bottom)
 - **Window Snapping** — Provided by labwc's built-in snapping (half-screen, maximize, corners) with keyboard shortcuts
-- **Notifications** — Via [mako](https://github.com/emersion/mako) notification daemon
+- **Notifications** — Built-in notification daemon (`rdm-notify`) implementing the freedesktop D-Bus notification spec
+- **Screenshots** — Multi-monitor screenshot tool (`rdm-screenshot`) using grim + slurp, saves to `~/Pictures/Screenshots/` and copies to clipboard
+- **Volume & Media Keys** — Multimedia key support for volume control (via WirePlumber) and media playback (via playerctl)
 
 ## What It Can't Do (Yet)
 
-- Volume / audio controls in the tray
 - Brightness slider in the tray
 - Visual snap zone previews (quarter/thirds tiling overlays)
 - Multi-monitor configuration UI
@@ -44,23 +45,24 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 - Theming beyond Tokyo Night (colors are currently hardcoded in CSS)
 - Application pinning in the taskbar
 - Drag-and-drop window reordering
-- Screen recording / screenshot tools
+- Screen recording
 
 ---
 
 ## Architecture
 
-RDM is a Cargo workspace with 7 crates:
+RDM is a Cargo workspace with 8 crates:
 
 | Crate | Binary | Purpose |
 |-------|--------|---------|
 | `rdm-session` | `rdm-session` | Process manager — starts/stops/restarts all shell components, handles hot reload via SIGUSR1 |
 | `rdm-panel` | `rdm-panel` | Panel bar — taskbar, clock, system tray (battery, wifi, power), launcher button |
 | `rdm-launcher` | `rdm-launcher` | Overlay app launcher — searches `.desktop` files, keyboard-driven |
+| `rdm-notify` | `rdm-notify` | Notification daemon — freedesktop D-Bus notifications with GTK4 layer-shell popups |
 | `rdm-settings` | `rdm-settings` | GTK4 settings GUI — panel config + wallpaper config |
 | `rdm-watermark` | `rdm-watermark` | Version watermark on desktop background |
 | `rdm-snap` | `rdm-snap` | Snap daemon (stub — labwc handles snapping natively for now) |
-| `rdm-common` | *(library)* | Shared config types, load/save, build info |
+| `rdm-common` | *(library)* | Shared config types, load/save, build info, theming |
 
 ### Runtime Dependencies (not Rust crates)
 
@@ -68,9 +70,12 @@ RDM is a Cargo workspace with 7 crates:
 |---------|------|
 | [labwc](https://labwc.github.io/) | Wayland compositor (wlroots-based) |
 | [swaybg](https://github.com/swaywm/swaybg) | Wallpaper renderer |
-| [mako](https://github.com/emersion/mako) | Notification daemon |
-| [swaylock](https://github.com/swaywm/swaylock) | Screen locker |
 | [foot](https://codeberg.org/dnkl/foot) | Default terminal emulator |
+| [grim](https://sr.ht/~emersion/grim/) | Screenshot capture (Wayland) |
+| [slurp](https://github.com/emersion/slurp) | Region selection for screenshots |
+| [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard support (screenshot copy) |
+| [WirePlumber](https://pipewire.pages.freedesktop.org/wireplumber/) | Volume control via `wpctl` |
+| [playerctl](https://github.com/altdesktop/playerctl) | Media playback control |
 | NetworkManager | WiFi management (via `nmcli`) |
 
 ### How It Starts
@@ -81,9 +86,9 @@ Display Manager (SDDM, etc.)
         └── labwc         (Wayland compositor)
               └── rdm-session   (reads session.toml, spawns all children)
                     ├── rdm-panel       (panel + taskbar + tray)
+                    ├── rdm-notify      (notification daemon)
                     ├── rdm-watermark   (version label)
-                    ├── swaybg          (wallpaper, args from rdm.toml)
-                    └── mako            (notifications)
+                    └── swaybg          (wallpaper, args from rdm.toml)
 ```
 
 ### Config Files
@@ -105,7 +110,10 @@ labwc config lives in `~/.config/labwc/rc.xml` (keybindings, snapping, theme).
 
 ```bash
 # Compositor and Wayland tools
-sudo pacman -S labwc swaybg swaylock mako foot
+sudo pacman -S labwc swaybg foot
+
+# Screenshot & media tools
+sudo pacman -S grim slurp wl-clipboard wireplumber playerctl
 
 # Build dependencies
 sudo pacman -S rust cargo gtk4 gtk4-layer-shell
@@ -130,10 +138,11 @@ chmod +x install.sh
 The install script will:
 1. Build all crates in release mode
 2. Install binaries to `/usr/local/bin/`
-3. Install the `rdm-start` and `rdm-reload` scripts
+3. Install the `rdm-start`, `rdm-reload`, and `rdm-screenshot` scripts
 4. Register RDM as a session in your display manager (`/usr/share/wayland-sessions/rdm.desktop`)
-5. Copy default configs to `~/.config/rdm/` (won't overwrite existing)
-6. Copy labwc config to `~/.config/labwc/rc.xml` (won't overwrite existing)
+5. Install D-Bus activation service for `rdm-notify`
+6. Copy default configs to `~/.config/rdm/` (won't overwrite existing)
+7. Copy labwc config to `~/.config/labwc/rc.xml` (won't overwrite existing)
 
 Then **log out** and select **"RDM Desktop"** from your display manager's session chooser.
 
@@ -158,13 +167,18 @@ chmod +x uninstall.sh
 
 | Key | Action |
 |-----|--------|
-| `Super` | Open app launcher |
-| `Super + Return` | Open terminal (foot) |
+| `Super` (tap) | Open app launcher |
+| `Super + Enter` | Open terminal (foot) |
+| `Super + S` | Screenshot (region select) |
+| `Super + Shift + S` | Screenshot (all monitors) |
+| `Print Screen` | Screenshot (all monitors) |
 | `Super + Left/Right/Up/Down` | Snap window to half-screen |
 | `Super + F` | Toggle maximize |
 | `Super + Q` | Close window |
 | `Super + 1-4` | Switch to workspace 1-4 |
 | `Super + Shift + 1-4` | Move window to workspace 1-4 |
+| `Volume Up/Down/Mute` | Adjust volume (multimedia keys) |
+| `Play/Next/Prev` | Media playback control |
 
 ### Development Workflow
 
