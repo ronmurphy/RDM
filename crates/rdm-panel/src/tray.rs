@@ -115,6 +115,10 @@ pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
         tray_btn.set_label("\u{f0425}"); // 󰐥
     }
 
+    // --- WiFi submenu ---
+    let wifi_submenu = crate::wifi::build_wifi_submenu(app);
+    menu.append_submenu(Some("\u{f05a9}  WiFi"), &wifi_submenu);
+
     // --- Session submenu ---
     let session_submenu = gtk4::gio::Menu::new();
     session_submenu.append(Some("\u{f033e}  Lock"), Some("app.lock"));

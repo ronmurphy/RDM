@@ -17,4 +17,5 @@ chrono = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 freedesktop-desktop-entry = { workspace = true }
+async-channel = { workspace = true }
 rdm-common = { workspace = true }

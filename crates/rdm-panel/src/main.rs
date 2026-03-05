@@ -2,6 +2,7 @@ mod clock;
 mod taskbar;
 mod toplevel;
 mod tray;
+mod wifi;
 
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation};
@@ -213,6 +214,18 @@ fn load_css() {
 
         popover modelbutton:hover {
             background-color: #292e42;
+        }
+
+        .wifi-dialog-title {
+            font-weight: bold;
+            font-size: 14px;
+            color: #c0caf5;
+        }
+
+        .wifi-error {
+            color: #f7768e;
+            font-size: 12px;
+            margin-top: 4px;
         }
     "#,
     );
