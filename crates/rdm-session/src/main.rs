@@ -3,7 +3,6 @@ use nix::unistd::Pid;
 use serde::Deserialize;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -80,7 +79,7 @@ async fn main() {
             stop_all(&mut processes);
 
             // Small delay to let processes fully exit and release layer-shell surfaces
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
 
             // Reload config in case it changed
             let new_config = load_session_config();
@@ -182,14 +181,38 @@ fn stop_all(processes: &mut Vec<ManagedProcess>) {
 }
 
 fn spawn_process(entry: &AutostartEntry) -> Option<Child> {
+    // For swaybg, build args from rdm.toml wallpaper config instead of session.toml args
+    let args: Vec<String> = if entry.command == "swaybg" {
+        build_swaybg_args()
+    } else {
+        entry.args.clone()
+    };
+
     Command::new(&entry.command)
-        .args(&entry.args)
+        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| log::error!("Failed to start {}: {}", entry.name, e))
         .ok()
+}
+
+/// Build swaybg arguments from the wallpaper config in rdm.toml
+fn build_swaybg_args() -> Vec<String> {
+    let config = rdm_common::config::RdmConfig::load();
+    let wp = &config.wallpaper;
+    let mut args = Vec::new();
+    if !wp.path.is_empty() {
+        args.push("-i".to_string());
+        args.push(wp.path.clone());
+        args.push("-m".to_string());
+        args.push(wp.mode.clone());
+    }
+    args.push("-c".to_string());
+    args.push(wp.color.clone());
+    log::info!("swaybg args: {:?}", args);
+    args
 }
 
 fn write_pid_file() {

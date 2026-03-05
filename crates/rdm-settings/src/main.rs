@@ -337,40 +337,12 @@ fn setting_row(label_text: &str) -> GtkBox {
     row
 }
 
-/// Apply changes: hot-reload the session and restart swaybg with new wallpaper
-fn apply_changes(config: &RdmConfig) {
-    // Restart swaybg with new wallpaper settings
-    // Kill existing swaybg
-    let _ = std::process::Command::new("pkill")
-        .arg("swaybg")
-        .status();
-
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    if !config.wallpaper.path.is_empty() {
-        let mut cmd = std::process::Command::new("swaybg");
-        cmd.arg("-i").arg(&config.wallpaper.path);
-        cmd.arg("-m").arg(&config.wallpaper.mode);
-        cmd.arg("-c").arg(&config.wallpaper.color);
-        match cmd.spawn() {
-            Ok(mut child) => {
-                std::thread::spawn(move || { let _ = child.wait(); });
-            }
-            Err(e) => log::error!("Failed to start swaybg: {}", e),
-        }
-    } else {
-        // Solid color only
-        let mut cmd = std::process::Command::new("swaybg");
-        cmd.arg("-c").arg(&config.wallpaper.color);
-        match cmd.spawn() {
-            Ok(mut child) => {
-                std::thread::spawn(move || { let _ = child.wait(); });
-            }
-            Err(e) => log::error!("Failed to start swaybg: {}", e),
-        }
-    }
-
-    // Hot-reload the panel for panel changes
+/// Apply changes: save config and hot-reload the session.
+/// rdm-session reads wallpaper config from rdm.toml when starting swaybg,
+/// so rdm-reload handles both panel and wallpaper changes.
+fn apply_changes(_config: &RdmConfig) {
+    // Hot-reload: rdm-session kills all children and restarts them.
+    // swaybg args are built from rdm.toml, so wallpaper is applied automatically.
     let _ = std::process::Command::new("rdm-reload").status();
 }
 
