@@ -1150,6 +1150,7 @@ dependencies = [
 name = "rdm-settings"
 version = "0.1.0"
 dependencies = [
+ "cairo-rs",
  "env_logger",
  "gtk4",
  "log",
