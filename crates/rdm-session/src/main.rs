@@ -65,6 +65,9 @@ async fn main() {
     // Write our PID so rdm-reload can find us
     write_pid_file();
 
+    // Apply display configuration from rdm.toml BEFORE starting panel/swaybg
+    apply_display_settings();
+
     let config = load_session_config();
     let mut processes = start_all(&config);
 
@@ -80,6 +83,12 @@ async fn main() {
 
             // Small delay to let processes fully exit and release layer-shell surfaces
             tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+
+            // Re-apply display config (may have changed via rdm-settings)
+            apply_display_settings();
+
+            // Small delay for display changes to settle before starting panel
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
             // Reload config in case it changed
             let new_config = load_session_config();
@@ -234,5 +243,19 @@ fn load_session_config() -> SessionConfig {
             log::info!("No session.toml found, using defaults");
             SessionConfig::default()
         }
+    }
+}
+
+/// Apply display configuration from rdm.toml using wlr-randr.
+/// Called before starting processes so the panel sees the correct monitor layout.
+fn apply_display_settings() {
+    let rdm_config = rdm_common::config::RdmConfig::load();
+    if rdm_config.displays.is_empty() {
+        log::info!("No display config in rdm.toml, using compositor defaults");
+        return;
+    }
+    match rdm_common::display::apply_display_config(&rdm_config.displays) {
+        Ok(()) => log::info!("Display configuration applied"),
+        Err(e) => log::error!("Failed to apply display config: {}", e),
     }
 }

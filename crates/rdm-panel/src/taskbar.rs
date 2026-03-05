@@ -47,14 +47,25 @@ struct TaskbarState {
 /// from the GTK main loop to update buttons.
 pub fn setup_taskbar(container: &gtk4::Box, mode: TaskbarMode) {
     let (shared, action_tx) = crate::toplevel::start_toplevel_tracker();
+    setup_taskbar_with_shared(container, mode, &shared, &Rc::new(action_tx));
+}
 
+/// Set up taskbar using an externally-provided toplevel tracker.
+/// This allows multiple panel windows to share one Wayland tracker thread.
+pub fn setup_taskbar_with_shared(
+    container: &gtk4::Box,
+    mode: TaskbarMode,
+    shared: &Arc<Mutex<SharedState>>,
+    action_tx: &Rc<std::sync::mpsc::Sender<ToplevelAction>>,
+) {
     let state = Rc::new(RefCell::new(TaskbarState {
         widgets: HashMap::new(),
         last_generation: 0,
     }));
 
     let container = container.clone();
-    let action_tx = Rc::new(action_tx);
+    let action_tx = action_tx.clone();
+    let shared = shared.clone();
 
     // Poll the shared state every 250ms
     gtk4::glib::timeout_add_local(std::time::Duration::from_millis(250), move || {

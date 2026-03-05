@@ -8,6 +8,10 @@ use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 fn main() {
     env_logger::init();
@@ -25,6 +29,49 @@ fn main() {
 }
 
 fn build_panel(app: &Application, config: &RdmConfig) {
+    let display = gtk4::gdk::Display::default().expect("No display");
+    let monitors = display.monitors();
+
+    // Start toplevel tracker ONCE, shared across all panel windows
+    let (shared_state, action_tx) = toplevel::start_toplevel_tracker();
+    let action_tx = Rc::new(action_tx);
+
+    // Track active panel windows by connector name
+    let windows: Rc<RefCell<HashMap<String, ApplicationWindow>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+
+    // Create panel for each connected monitor
+    for i in 0..monitors.n_items() {
+        if let Some(obj) = monitors.item(i) {
+            if let Ok(monitor) = obj.downcast::<gtk4::gdk::Monitor>() {
+                let connector = monitor
+                    .connector()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| format!("unknown-{}", i));
+                log::info!("Creating panel for monitor: {}", connector);
+                let win =
+                    build_panel_window(app, config, &monitor, &shared_state, &action_tx);
+                windows.borrow_mut().insert(connector, win);
+            }
+        }
+    }
+
+    // Load CSS once for all windows
+    load_css();
+
+    log::info!(
+        "Panel initialized with {} monitor(s)",
+        windows.borrow().len()
+    );
+}
+
+fn build_panel_window(
+    app: &Application,
+    config: &RdmConfig,
+    monitor: &gtk4::gdk::Monitor,
+    shared_state: &Arc<Mutex<toplevel::SharedState>>,
+    action_tx: &Rc<std::sync::mpsc::Sender<toplevel::ToplevelAction>>,
+) -> ApplicationWindow {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("RDM Panel")
@@ -36,6 +83,9 @@ fn build_panel(app: &Application, config: &RdmConfig) {
     window.init_layer_shell();
     window.set_layer(Layer::Top);
     window.set_namespace("rdm-panel");
+
+    // Pin this window to the specific monitor
+    window.set_monitor(monitor);
 
     // Anchor to edges based on position
     let at_top = config.panel.position == "top";
@@ -70,13 +120,13 @@ fn build_panel(app: &Application, config: &RdmConfig) {
     let sep = gtk4::Separator::new(Orientation::Vertical);
     hbox.append(&sep);
 
-    // Center: taskbar (running windows)
+    // Center: taskbar (running windows) — uses shared toplevel tracker
     let taskbar_box = gtk4::Box::new(Orientation::Horizontal, 4);
     taskbar_box.set_hexpand(true);
     taskbar_box.set_halign(gtk4::Align::Start);
     taskbar_box.add_css_class("taskbar");
     let mode = taskbar::TaskbarMode::from_str(&config.panel.taskbar_mode);
-    taskbar::setup_taskbar(&taskbar_box, mode);
+    taskbar::setup_taskbar_with_shared(&taskbar_box, mode, shared_state, action_tx);
     hbox.append(&taskbar_box);
 
     // Right: clock
@@ -93,10 +143,8 @@ fn build_panel(app: &Application, config: &RdmConfig) {
 
     window.set_child(Some(&hbox));
 
-    // Load CSS
-    load_css();
-
     window.present();
+    window
 }
 
 fn load_css() {

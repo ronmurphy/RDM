@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::display::DisplayConfig;
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RdmConfig {
     #[serde(default)]
@@ -11,6 +13,8 @@ pub struct RdmConfig {
     pub snap: SnapConfig,
     #[serde(default)]
     pub wallpaper: WallpaperConfig,
+    #[serde(default)]
+    pub displays: Vec<DisplayConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -118,6 +122,7 @@ impl Default for RdmConfig {
             launcher: LauncherConfig::default(),
             snap: SnapConfig::default(),
             wallpaper: WallpaperConfig::default(),
+            displays: Vec::new(),
         }
     }
 }

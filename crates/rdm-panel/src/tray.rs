@@ -88,10 +88,12 @@ pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
         battery_section.append(Some(&bat_label), Some("app.battery-info"));
         menu.append_section(None, &battery_section);
 
-        // No-op action for battery display
-        let battery_action = gtk4::gio::SimpleAction::new("battery-info", None);
-        battery_action.set_enabled(false);
-        app.add_action(&battery_action);
+        // No-op action for battery display (guard against duplicate registration)
+        if app.lookup_action("battery-info").is_none() {
+            let battery_action = gtk4::gio::SimpleAction::new("battery-info", None);
+            battery_action.set_enabled(false);
+            app.add_action(&battery_action);
+        }
 
         // Update the tray button label with battery info and refresh menu periodically
         update_tray_button(&tray_btn, &bat);
@@ -130,33 +132,35 @@ pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
 
     tray_btn.set_menu_model(Some(&menu));
 
-    // --- Wire up session actions ---
-    let action_lock = gtk4::gio::SimpleAction::new("lock", None);
-    action_lock.connect_activate(|_, _| {
-        if let Err(e) = std::process::Command::new("swaylock").spawn() {
-            log::error!("Failed to lock: {}", e);
-        }
-    });
+    // --- Wire up session actions (guard against duplicate registration for multi-monitor) ---
+    if app.lookup_action("lock").is_none() {
+        let action_lock = gtk4::gio::SimpleAction::new("lock", None);
+        action_lock.connect_activate(|_, _| {
+            if let Err(e) = std::process::Command::new("swaylock").spawn() {
+                log::error!("Failed to lock: {}", e);
+            }
+        });
 
-    let action_logout = gtk4::gio::SimpleAction::new("logout", None);
-    action_logout.connect_activate(|_, _| {
-        let _ = std::process::Command::new("labwc").arg("--exit").spawn();
-    });
+        let action_logout = gtk4::gio::SimpleAction::new("logout", None);
+        action_logout.connect_activate(|_, _| {
+            let _ = std::process::Command::new("labwc").arg("--exit").spawn();
+        });
 
-    let action_reboot = gtk4::gio::SimpleAction::new("reboot", None);
-    action_reboot.connect_activate(|_, _| {
-        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
-    });
+        let action_reboot = gtk4::gio::SimpleAction::new("reboot", None);
+        action_reboot.connect_activate(|_, _| {
+            let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+        });
 
-    let action_shutdown = gtk4::gio::SimpleAction::new("shutdown", None);
-    action_shutdown.connect_activate(|_, _| {
-        let _ = std::process::Command::new("systemctl").arg("poweroff").spawn();
-    });
+        let action_shutdown = gtk4::gio::SimpleAction::new("shutdown", None);
+        action_shutdown.connect_activate(|_, _| {
+            let _ = std::process::Command::new("systemctl").arg("poweroff").spawn();
+        });
 
-    app.add_action(&action_lock);
-    app.add_action(&action_logout);
-    app.add_action(&action_reboot);
-    app.add_action(&action_shutdown);
+        app.add_action(&action_lock);
+        app.add_action(&action_logout);
+        app.add_action(&action_reboot);
+        app.add_action(&action_shutdown);
+    }
 
     tray_btn
 }

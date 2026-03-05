@@ -123,39 +123,42 @@ pub fn build_wifi_submenu(app: &gtk4::Application) -> gtk4::gio::Menu {
     populate_wifi_menu(&submenu);
 
     // Action: connect to a WiFi network (parameter = SSID)
-    let wifi_action = gtk4::gio::SimpleAction::new(
-        "wifi-connect",
-        Some(&String::static_variant_type()),
-    );
+    // Guard against duplicate registration for multi-monitor
+    if app.lookup_action("wifi-connect").is_none() {
+        let wifi_action = gtk4::gio::SimpleAction::new(
+            "wifi-connect",
+            Some(&String::static_variant_type()),
+        );
 
-    wifi_action.connect_activate(|_, param| {
-        let ssid = param
-            .and_then(|v| v.get::<String>())
-            .unwrap_or_default();
-        if ssid.is_empty() {
-            return;
-        }
-
-        if is_known_network(&ssid) {
-            // Known network — connect directly
-            match connect_known(&ssid) {
-                Ok(()) => log::info!("Connected to {}", ssid),
-                Err(e) => log::error!("Failed to connect to {}: {}", ssid, e),
+        wifi_action.connect_activate(|_, param| {
+            let ssid = param
+                .and_then(|v| v.get::<String>())
+                .unwrap_or_default();
+            if ssid.is_empty() {
+                return;
             }
-        } else {
-            // Unknown network — show password dialog
-            show_password_dialog(&ssid);
-        }
-    });
-    app.add_action(&wifi_action);
 
-    // Action: refresh WiFi list
-    let refresh_action = gtk4::gio::SimpleAction::new("wifi-refresh", None);
-    let submenu_ref = submenu.clone();
-    refresh_action.connect_activate(move |_, _| {
-        populate_wifi_menu(&submenu_ref);
-    });
-    app.add_action(&refresh_action);
+            if is_known_network(&ssid) {
+                // Known network — connect directly
+                match connect_known(&ssid) {
+                    Ok(()) => log::info!("Connected to {}", ssid),
+                    Err(e) => log::error!("Failed to connect to {}: {}", ssid, e),
+                }
+            } else {
+                // Unknown network — show password dialog
+                show_password_dialog(&ssid);
+            }
+        });
+        app.add_action(&wifi_action);
+
+        // Action: refresh WiFi list
+        let refresh_action = gtk4::gio::SimpleAction::new("wifi-refresh", None);
+        let submenu_ref = submenu.clone();
+        refresh_action.connect_activate(move |_, _| {
+            populate_wifi_menu(&submenu_ref);
+        });
+        app.add_action(&refresh_action);
+    }
 
     // Auto-refresh every 30 seconds
     let submenu_clone = submenu.clone();
