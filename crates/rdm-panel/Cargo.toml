@@ -11,6 +11,7 @@ path = "src/main.rs"
 gtk4 = { workspace = true }
 gtk4-layer-shell = { workspace = true }
 wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
 wayland-protocols-wlr = { workspace = true }
 chrono = { workspace = true }
 log = { workspace = true }

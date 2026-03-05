@@ -1073,6 +1073,7 @@ dependencies = [
  "log",
  "rdm-common",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-wlr",
 ]
 

@@ -1,5 +1,6 @@
 mod clock;
 mod taskbar;
+mod toplevel;
 
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation};
