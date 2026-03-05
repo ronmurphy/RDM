@@ -73,7 +73,8 @@ fn build_panel(app: &Application, config: &RdmConfig) {
     taskbar_box.set_hexpand(true);
     taskbar_box.set_halign(gtk4::Align::Start);
     taskbar_box.add_css_class("taskbar");
-    taskbar::setup_taskbar(&taskbar_box);
+    let mode = taskbar::TaskbarMode::from_str(&config.panel.taskbar_mode);
+    taskbar::setup_taskbar(&taskbar_box, mode);
     hbox.append(&taskbar_box);
 
     // Right: clock
@@ -83,6 +84,48 @@ fn build_panel(app: &Application, config: &RdmConfig) {
         clock::setup_clock(&clock_label, &config.panel.clock_format);
         hbox.append(&clock_label);
     }
+
+    // Right: power menu
+    let power_btn = gtk4::MenuButton::new();
+    power_btn.set_label("\u{23FB}"); // ⏻ power symbol
+    power_btn.add_css_class("power-btn");
+
+    let power_menu = gtk4::gio::Menu::new();
+    power_menu.append(Some("Lock"), Some("app.lock"));
+    power_menu.append(Some("Logout"), Some("app.logout"));
+    power_menu.append(Some("Reboot"), Some("app.reboot"));
+    power_menu.append(Some("Shutdown"), Some("app.shutdown"));
+    power_btn.set_menu_model(Some(&power_menu));
+
+    // Wire up actions
+    let action_lock = gtk4::gio::SimpleAction::new("lock", None);
+    action_lock.connect_activate(|_, _| {
+        if let Err(e) = std::process::Command::new("swaylock").spawn() {
+            log::error!("Failed to lock: {}", e);
+        }
+    });
+
+    let action_logout = gtk4::gio::SimpleAction::new("logout", None);
+    action_logout.connect_activate(|_, _| {
+        let _ = std::process::Command::new("labwc").arg("--exit").spawn();
+    });
+
+    let action_reboot = gtk4::gio::SimpleAction::new("reboot", None);
+    action_reboot.connect_activate(|_, _| {
+        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+    });
+
+    let action_shutdown = gtk4::gio::SimpleAction::new("shutdown", None);
+    action_shutdown.connect_activate(|_, _| {
+        let _ = std::process::Command::new("systemctl").arg("poweroff").spawn();
+    });
+
+    app.add_action(&action_lock);
+    app.add_action(&action_logout);
+    app.add_action(&action_reboot);
+    app.add_action(&action_shutdown);
+
+    hbox.append(&power_btn);
 
     window.set_child(Some(&hbox));
 
@@ -140,6 +183,22 @@ fn load_css() {
             color: #ffffff;
         }
 
+        .taskbar-item.minimized {
+            opacity: 0.5;
+        }
+
+        .taskbar-icon {
+            padding: 2px 6px;
+            min-width: 28px;
+        }
+
+        .taskbar-nerd {
+            padding: 2px 8px;
+            min-width: 28px;
+            font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
+            font-size: 16px;
+        }
+
         .clock {
             padding: 4px 12px;
             color: #a9b1d6;
@@ -149,6 +208,38 @@ fn load_css() {
             background-color: #3b4261;
             margin: 6px 4px;
             min-width: 1px;
+        }
+
+        .power-btn {
+            background: transparent;
+            color: #f7768e;
+            border: none;
+            border-radius: 0;
+            padding: 4px 10px;
+            font-size: 15px;
+            min-height: 0;
+        }
+
+        .power-btn:hover {
+            background-color: #292e42;
+        }
+
+        popover contents {
+            background-color: #1a1b26;
+            color: #c0caf5;
+            border: 1px solid #3b4261;
+            border-radius: 8px;
+            padding: 4px 0;
+        }
+
+        popover modelbutton {
+            padding: 6px 16px;
+            color: #c0caf5;
+            min-height: 0;
+        }
+
+        popover modelbutton:hover {
+            background-color: #292e42;
         }
     "#,
     );

@@ -23,6 +23,9 @@ pub struct PanelConfig {
     pub show_workspaces: bool,
     #[serde(default = "default_clock_format")]
     pub clock_format: String,
+    /// Taskbar display mode: "text", "icons", "nerd"
+    #[serde(default = "default_taskbar_mode")]
+    pub taskbar_mode: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -48,6 +51,7 @@ fn default_clock_format() -> String { "%H:%M  %b %d".into() }
 fn default_launcher_width() -> i32 { 500 }
 fn default_launcher_height() -> i32 { 400 }
 fn default_snap_threshold() -> i32 { 20 }
+fn default_taskbar_mode() -> String { "icons".into() }
 
 impl Default for PanelConfig {
     fn default() -> Self {
@@ -57,6 +61,7 @@ impl Default for PanelConfig {
             show_clock: true,
             show_workspaces: true,
             clock_format: default_clock_format(),
+            taskbar_mode: default_taskbar_mode(),
         }
     }
 }
