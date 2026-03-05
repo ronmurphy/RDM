@@ -145,7 +145,7 @@ fn build_menu_content(
     app: &Application,
     config: &Rc<RefCell<RdmConfig>>,
     mode: DisplayMode,
-    is_full: bool,
+    _is_full: bool,
 ) -> gtk4::Box {
     let root = gtk4::Box::new(Orientation::Vertical, 0);
     root.add_css_class("menu-root");
@@ -219,7 +219,6 @@ fn build_menu_content(
     // ── Right pane (Favorites) ──
     let right_pane = gtk4::Box::new(Orientation::Vertical, 8);
     right_pane.set_hexpand(true);
-    right_pane.set_width_request(380);
     right_pane.add_css_class("menu-right");
     right_pane.set_margin_top(8);
     right_pane.set_margin_start(12);
@@ -237,12 +236,13 @@ fn build_menu_content(
 
     let fav_flow_inner = gtk4::FlowBox::new();
     fav_flow_inner.set_selection_mode(gtk4::SelectionMode::None);
-    fav_flow_inner.set_max_children_per_line(if is_full { 8 } else { 4 });
-    fav_flow_inner.set_min_children_per_line(if is_full { 4 } else { 2 });
-    fav_flow_inner.set_row_spacing(8);
-    fav_flow_inner.set_column_spacing(8);
+    fav_flow_inner.set_max_children_per_line(20);
+    fav_flow_inner.set_min_children_per_line(1);
+    fav_flow_inner.set_row_spacing(12);
+    fav_flow_inner.set_column_spacing(12);
     fav_flow_inner.set_homogeneous(true);
     fav_flow_inner.set_hexpand(true);
+    fav_flow_inner.set_valign(gtk4::Align::Start);
     fav_flow_inner.add_css_class("menu-favorites");
 
     // Wrap in Rc early so all closures share the same reference
@@ -625,7 +625,7 @@ fn make_favorite_tile(
     tile.add_css_class("menu-fav-tile");
     tile.set_halign(gtk4::Align::Center);
     tile.set_valign(gtk4::Align::Start);
-    tile.set_size_request(90, 80);
+    tile.set_size_request(80, -1);
 
     match mode {
         DisplayMode::Icons => {

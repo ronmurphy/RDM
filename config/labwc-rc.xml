@@ -27,8 +27,8 @@
   </snapping>
 
   <keyboard>
-    <!-- App launcher -->
-    <keybind key="Super_L">
+    <!-- App launcher (fires on release so Super+key combos work) -->
+    <keybind key="Super_L" onRelease="yes">
       <action name="Execute" command="rdm-launcher" />
     </keybind>
 
@@ -87,6 +87,45 @@
     </keybind>
     <keybind key="S-S-4">
       <action name="SendToDesktop" to="4" follow="true" />
+    </keybind>
+
+    <!-- ==================== Screenshots ==================== -->
+    <!-- Super+S: select a region to capture -->
+    <keybind key="W-s">
+      <action name="Execute" command="rdm-screenshot region" />
+    </keybind>
+    <!-- Super+Shift+S: capture all monitors -->
+    <keybind key="W-S-s">
+      <action name="Execute" command="rdm-screenshot full" />
+    </keybind>
+    <!-- Print Screen: capture all monitors -->
+    <keybind key="Print">
+      <action name="Execute" command="rdm-screenshot full" />
+    </keybind>
+
+    <!-- ==================== Volume (multimedia keys) ==================== -->
+    <keybind key="XF86AudioRaiseVolume">
+      <action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%%+" />
+    </keybind>
+    <keybind key="XF86AudioLowerVolume">
+      <action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%%-" />
+    </keybind>
+    <keybind key="XF86AudioMute">
+      <action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" />
+    </keybind>
+    <keybind key="XF86AudioMicMute">
+      <action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle" />
+    </keybind>
+
+    <!-- ==================== Media playback ==================== -->
+    <keybind key="XF86AudioPlay">
+      <action name="Execute" command="playerctl play-pause" />
+    </keybind>
+    <keybind key="XF86AudioNext">
+      <action name="Execute" command="playerctl next" />
+    </keybind>
+    <keybind key="XF86AudioPrev">
+      <action name="Execute" command="playerctl previous" />
     </keybind>
   </keyboard>
 

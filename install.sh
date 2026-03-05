@@ -34,8 +34,10 @@ missing=()
 command -v cargo  >/dev/null 2>&1 || missing+=("rust/cargo")
 command -v labwc  >/dev/null 2>&1 || missing+=("labwc")
 command -v swaybg >/dev/null 2>&1 || missing+=("swaybg")
-command -v mako   >/dev/null 2>&1 || missing+=("mako")
 command -v foot   >/dev/null 2>&1 || missing+=("foot")
+command -v grim   >/dev/null 2>&1 || missing+=("grim")
+command -v slurp  >/dev/null 2>&1 || missing+=("slurp")
+command -v wpctl  >/dev/null 2>&1 || missing+=("wireplumber")
 
 if pkg-config --exists gtk4 2>/dev/null; then
     ok "gtk4"
@@ -53,7 +55,7 @@ if [ ${#missing[@]} -gt 0 ]; then
     err "Missing dependencies: ${missing[*]}"
     echo ""
     echo "  Install on Arch Linux:"
-    echo "    sudo pacman -S labwc swaybg swaylock mako foot rust gtk4 gtk4-layer-shell networkmanager"
+    echo "    sudo pacman -S labwc swaybg foot rust gtk4 gtk4-layer-shell grim slurp wl-clipboard wireplumber networkmanager"
     echo ""
     echo "  Then re-run this script."
     exit 1
@@ -79,17 +81,19 @@ sudo install -Dm755 target/release/rdm-session    "$PREFIX/bin/rdm-session"
 sudo install -Dm755 target/release/rdm-snap       "$PREFIX/bin/rdm-snap"
 sudo install -Dm755 target/release/rdm-watermark  "$PREFIX/bin/rdm-watermark"
 sudo install -Dm755 target/release/rdm-settings   "$PREFIX/bin/rdm-settings"
+sudo install -Dm755 target/release/rdm-notify    "$PREFIX/bin/rdm-notify"
 
-ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings"
+ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify"
 
 # ─── Install scripts ───────────────────────────────────────────
 
 info "Installing scripts..."
 
-sudo install -Dm755 scripts/rdm-start   "$PREFIX/bin/rdm-start"
-sudo install -Dm755 scripts/rdm-reload  "$PREFIX/bin/rdm-reload"
+sudo install -Dm755 scripts/rdm-start      "$PREFIX/bin/rdm-start"
+sudo install -Dm755 scripts/rdm-reload     "$PREFIX/bin/rdm-reload"
+sudo install -Dm755 scripts/rdm-screenshot "$PREFIX/bin/rdm-screenshot"
 
-ok "rdm-start, rdm-reload"
+ok "rdm-start, rdm-reload, rdm-screenshot"
 
 # ─── Install session entry ─────────────────────────────────────
 
@@ -98,6 +102,21 @@ info "Registering RDM as a Wayland session..."
 sudo install -Dm644 config/rdm.desktop /usr/share/wayland-sessions/rdm.desktop
 
 ok "Session entry: /usr/share/wayland-sessions/rdm.desktop"
+
+# ─── Install D-Bus service for rdm-notify ──────────────────────
+
+info "Installing D-Bus activation service for rdm-notify..."
+
+DBUS_SERVICES="${XDG_DATA_HOME:-$HOME/.local/share}/dbus-1/services"
+mkdir -p "$DBUS_SERVICES"
+# Write with the correct install prefix
+cat > "$DBUS_SERVICES/org.freedesktop.Notifications.service" <<DBUSEOF
+[D-BUS Service]
+Name=org.freedesktop.Notifications
+Exec=$PREFIX/bin/rdm-notify
+DBUSEOF
+
+ok "D-Bus service: $DBUS_SERVICES/org.freedesktop.Notifications.service"
 
 # ─── Copy default configs ──────────────────────────────────────
 

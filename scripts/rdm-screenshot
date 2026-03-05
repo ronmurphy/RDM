@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# rdm-screenshot — Multi-monitor aware screenshot tool for RDM Desktop
+# Uses grim (capture) + slurp (region select) + wl-copy (clipboard)
+#
+# Usage:
+#   rdm-screenshot full      — Capture all outputs (all monitors)
+#   rdm-screenshot region    — Interactive region selection
+#   rdm-screenshot output    — Capture the focused output (current monitor)
+#
+# Screenshots are saved to ~/Pictures/Screenshots/ as PNG files.
+
+set -euo pipefail
+
+SCREENSHOTS_DIR="${HOME}/Pictures/Screenshots"
+mkdir -p "$SCREENSHOTS_DIR"
+
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+MODE="${1:-full}"
+
+case "$MODE" in
+    full)
+        FILENAME="${SCREENSHOTS_DIR}/screenshot_${TIMESTAMP}.png"
+        grim "$FILENAME"
+        ;;
+
+    region)
+        FILENAME="${SCREENSHOTS_DIR}/screenshot_${TIMESTAMP}_region.png"
+        GEOM=$(slurp 2>/dev/null) || exit 0  # exit silently if user cancels
+        grim -g "$GEOM" "$FILENAME"
+        ;;
+
+    output)
+        FILENAME="${SCREENSHOTS_DIR}/screenshot_${TIMESTAMP}_output.png"
+        # Get the focused output name from the compositor
+        # slurp -o lets the user click an output; we auto-select via slurp -o -f '%o'
+        # Alternative: use wlr-randr to find the focused output
+        GEOM=$(slurp -o -f '%x,%y %wx%h' 2>/dev/null) || exit 0
+        grim -g "$GEOM" "$FILENAME"
+        ;;
+
+    *)
+        echo "Usage: rdm-screenshot {full|region|output}" >&2
+        exit 1
+        ;;
+esac
+
+# Copy to clipboard
+wl-copy < "$FILENAME" --type image/png 2>/dev/null || true
+
+# Send notification
+notify-send "Screenshot Saved" "$FILENAME" 2>/dev/null || true
