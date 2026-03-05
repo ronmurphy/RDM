@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::{
-    delegate_noop,
+    delegate_noop, event_created_child,
     globals::{registry_queue_init, GlobalListContents},
     protocol::{wl_output::WlOutput, wl_registry, wl_seat},
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
@@ -149,6 +149,10 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for WaylandState {
             _ => {}
         }
     }
+
+    event_created_child!(WaylandState, ZwlrForeignToplevelManagerV1, [
+        zwlr_foreign_toplevel_manager_v1::EVT_TOPLEVEL_OPCODE => (ZwlrForeignToplevelHandleV1, ()),
+    ]);
 }
 
 impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for WaylandState {
@@ -223,8 +227,39 @@ pub fn start_toplevel_tracker() -> (Arc<Mutex<SharedState>>, std::sync::mpsc::Se
 
     let shared_clone = shared.clone();
     std::thread::spawn(move || {
-        if let Err(e) = run_wayland_loop(shared_clone, action_rx) {
-            log::error!("Wayland toplevel tracker died: {}", e);
+        use std::io::Write;
+        let log_write = |msg: &str| {
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/rdm-taskbar.log")
+                .and_then(|mut f| writeln!(f, "{}", msg));
+        };
+
+        log_write("toplevel thread spawned");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_wayland_loop(shared_clone, action_rx)
+        }));
+
+        match result {
+            Ok(Ok(())) => log_write("toplevel loop exited normally"),
+            Ok(Err(e)) => {
+                let msg = format!("toplevel tracker error: {}", e);
+                log_write(&msg);
+                log::error!("{}", msg);
+            }
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    format!("toplevel tracker PANICKED: {}", s)
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    format!("toplevel tracker PANICKED: {}", s)
+                } else {
+                    "toplevel tracker PANICKED (unknown payload)".to_string()
+                };
+                log_write(&msg);
+                log::error!("{}", msg);
+            }
         }
     });
 
@@ -235,17 +270,36 @@ fn run_wayland_loop(
     shared: Arc<Mutex<SharedState>>,
     action_rx: std::sync::mpsc::Receiver<ToplevelAction>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut dbg = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/rdm-taskbar.log")
+        .ok();
+    macro_rules! dbglog {
+        ($($arg:tt)*) => {
+            if let Some(ref mut f) = dbg { let _ = writeln!(f, $($arg)*); }
+        }
+    }
+
+    dbglog!("toplevel: connecting to wayland...");
     let conn = Connection::connect_to_env()?;
+    dbglog!("toplevel: connected, initializing registry...");
     let (globals, mut event_queue): (_, EventQueue<WaylandState>) =
         registry_queue_init(&conn)?;
 
     let qh = event_queue.handle();
 
+    dbglog!("toplevel: binding foreign toplevel manager...");
     // Bind the foreign toplevel manager
-    let _manager = globals.bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ())?;
+    let _manager = match globals.bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ()) {
+        Ok(m) => { dbglog!("toplevel: bound OK"); m }
+        Err(e) => { dbglog!("toplevel: BIND FAILED: {}", e); return Err(e.into()); }
+    };
 
     // Bind a seat for activate requests
     let seat: Option<WlSeat> = globals.bind::<WlSeat, _, _>(&qh, 1..=9, ()).ok();
+    dbglog!("toplevel: seat bound: {}", seat.is_some());
 
     let mut state = WaylandState {
         shared,
@@ -257,6 +311,7 @@ fn run_wayland_loop(
         id_to_handle: HashMap::new(),
     };
 
+    dbglog!("toplevel: entering event loop");
     log::info!("Foreign toplevel manager bound — tracking windows");
 
     loop {
