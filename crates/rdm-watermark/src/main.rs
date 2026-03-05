@@ -53,22 +53,15 @@ fn build_watermark(app: &Application, version: &str) {
 }
 
 fn load_css() {
-    let css = CssProvider::new();
-    css.load_from_data(
-        r#"
-        window.background {
-            background-color: transparent;
-        }
-
-        .watermark {
-            color: rgba(255, 255, 255, 0.25);
-            font-family: "Inter", "Noto Sans Mono", monospace;
-            font-size: 11px;
-            padding: 4px 8px;
-            background-color: transparent;
-        }
-    "#,
+    let theme_css = rdm_common::theme::load_theme_css();
+    // Transparent background is mandatory for watermark, regardless of theme
+    let full_css = format!(
+        "window.background {{ background-color: transparent; }}\n{}",
+        theme_css,
     );
+
+    let css = CssProvider::new();
+    css.load_from_data(&full_css);
 
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("No display"),

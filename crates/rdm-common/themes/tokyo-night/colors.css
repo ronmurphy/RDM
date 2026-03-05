@@ -1,0 +1,16 @@
+/* Tokyo Night color palette */
+@define-color theme_bg #1a1b26;
+@define-color theme_fg #c0caf5;
+@define-color theme_surface #292e42;
+@define-color theme_border #3b4261;
+@define-color theme_active #3d59a1;
+@define-color theme_accent #7aa2f7;
+@define-color theme_accent_hover #89b4fa;
+@define-color theme_deep_bg #16161e;
+@define-color theme_muted #565f89;
+@define-color theme_subtle #a9b1d6;
+@define-color theme_green #9ece6a;
+@define-color theme_yellow #e0af68;
+@define-color theme_red #f7768e;
+@define-color theme_cyan #7dcfff;
+@define-color theme_purple #bb9af7;

@@ -2,10 +2,11 @@ use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, CssProvider, Label, Orientation, ScrolledWindow,
 };
-use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
 use rdm_common::desktop_apps::{self, AppEntry};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 // ─── Display mode (local copy, no dependency on rdm-panel) ───────
@@ -46,13 +47,15 @@ fn main() {
 
 fn build_launcher(app: &Application, config: &RdmConfig) {
     let mode = DisplayMode::from_str(&config.panel.taskbar_mode);
+    let launcher_pos = config.menu.launcher_position.clone();
+    let is_full = launcher_pos == "full";
     let config = Rc::new(RefCell::new(config.clone()));
 
     let window = ApplicationWindow::builder()
         .application(app)
         .title("RDM Launcher")
-        .default_width(700)
-        .default_height(500)
+        .default_width(if is_full { 0 } else { 700 })
+        .default_height(if is_full { 0 } else { 500 })
         .build();
 
     // Layer shell setup — overlay that grabs keyboard
@@ -60,6 +63,33 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
     window.set_layer(Layer::Overlay);
     window.set_namespace("rdm-launcher");
     window.set_keyboard_mode(KeyboardMode::Exclusive);
+
+    // Position modes
+    {
+        let cfg = config.borrow();
+        match launcher_pos.as_str() {
+            "panel" => {
+                let at_top = cfg.panel.position == "top";
+                window.set_anchor(Edge::Left, true);
+                if at_top {
+                    window.set_anchor(Edge::Top, true);
+                    window.set_margin(Edge::Top, cfg.panel.height);
+                } else {
+                    window.set_anchor(Edge::Bottom, true);
+                    window.set_margin(Edge::Bottom, cfg.panel.height);
+                }
+            }
+            "full" => {
+                window.set_anchor(Edge::Top, true);
+                window.set_anchor(Edge::Bottom, true);
+                window.set_anchor(Edge::Left, true);
+                window.set_anchor(Edge::Right, true);
+            }
+            _ => {
+                // "center" — no anchors, layer-shell centers by default
+            }
+        }
+    }
 
     // Escape closes
     let app_for_key = app.clone();
@@ -82,11 +112,31 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
     });
 
     // Build content
-    let content = build_menu_content(app, &config, mode);
+    let content = build_menu_content(app, &config, mode, is_full);
     window.set_child(Some(&content));
 
     load_css();
     window.present();
+}
+
+// ─── Icon color cache ────────────────────────────────────────────
+
+type ColorCache = Rc<RefCell<HashMap<String, Option<(f64, f64, f64)>>>>;
+
+fn build_color_cache(entries: &[AppEntry], mode: DisplayMode) -> ColorCache {
+    let cache = Rc::new(RefCell::new(HashMap::new()));
+    if mode == DisplayMode::Icons {
+        return cache; // Icons mode doesn't use colors
+    }
+    for entry in entries {
+        if let Some(ref icon_name) = entry.icon {
+            if !cache.borrow().contains_key(icon_name) {
+                let color = extract_icon_color(icon_name);
+                cache.borrow_mut().insert(icon_name.clone(), color);
+            }
+        }
+    }
+    cache
 }
 
 // ─── Menu content ─────────────────────────────────────────────────
@@ -95,6 +145,7 @@ fn build_menu_content(
     app: &Application,
     config: &Rc<RefCell<RdmConfig>>,
     mode: DisplayMode,
+    is_full: bool,
 ) -> gtk4::Box {
     let root = gtk4::Box::new(Orientation::Vertical, 0);
     root.add_css_class("menu-root");
@@ -121,6 +172,7 @@ fn build_menu_content(
     // Load apps
     let entries = Rc::new(desktop_apps::load_desktop_entries());
     let categorized = Rc::new(desktop_apps::categorize_entries(&entries));
+    let color_cache = build_color_cache(&entries, mode);
 
     // Category list
     let cat_scroll = ScrolledWindow::new();
@@ -167,6 +219,7 @@ fn build_menu_content(
     // ── Right pane (Favorites) ──
     let right_pane = gtk4::Box::new(Orientation::Vertical, 8);
     right_pane.set_hexpand(true);
+    right_pane.set_width_request(380);
     right_pane.add_css_class("menu-right");
     right_pane.set_margin_top(8);
     right_pane.set_margin_start(12);
@@ -184,23 +237,24 @@ fn build_menu_content(
 
     let fav_flow_inner = gtk4::FlowBox::new();
     fav_flow_inner.set_selection_mode(gtk4::SelectionMode::None);
-    fav_flow_inner.set_max_children_per_line(4);
-    fav_flow_inner.set_min_children_per_line(2);
+    fav_flow_inner.set_max_children_per_line(if is_full { 8 } else { 4 });
+    fav_flow_inner.set_min_children_per_line(if is_full { 4 } else { 2 });
     fav_flow_inner.set_row_spacing(8);
     fav_flow_inner.set_column_spacing(8);
     fav_flow_inner.set_homogeneous(true);
+    fav_flow_inner.set_hexpand(true);
     fav_flow_inner.add_css_class("menu-favorites");
 
     // Wrap in Rc early so all closures share the same reference
     let fav_flow: Rc<gtk4::FlowBox> = Rc::new(fav_flow_inner);
 
-    populate_favorites(&fav_flow, &entries, config, mode);
+    populate_favorites(&fav_flow, &entries, config, mode, &color_cache);
 
     fav_scroll.set_child(Some(fav_flow.as_ref()));
     right_pane.append(&fav_scroll);
 
     // Now populate app list (needs fav_flow reference for context menus)
-    populate_app_list(app, &app_list, &entries, mode, config, &fav_flow);
+    populate_app_list(app, &app_list, &entries, mode, config, &fav_flow, &color_cache);
     let hint = Label::new(Some("Right-click app to add/remove from favorites."));
     hint.add_css_class("menu-hint");
     hint.set_halign(gtk4::Align::Start);
@@ -223,12 +277,13 @@ fn build_menu_content(
     let config_for_cat = config.clone();
     let fav_flow_for_cat = fav_flow.clone();
     let app_for_cat = app.clone();
+    let cache_for_cat = color_cache.clone();
     cat_list.connect_row_selected(move |_, row| {
         if let Some(row) = row {
             let idx = row.index();
             if idx == 0 {
                 // "All"
-                populate_app_list(&app_for_cat, &app_list_for_cat, &entries_for_cat, mode, &config_for_cat, &fav_flow_for_cat);
+                populate_app_list(&app_for_cat, &app_list_for_cat, &entries_for_cat, mode, &config_for_cat, &fav_flow_for_cat, &cache_for_cat);
             } else {
                 let cat_keys: Vec<String> = categorized_for_cat.keys().cloned().collect();
                 if let Some(cat_name) = cat_keys.get((idx - 1) as usize) {
@@ -240,6 +295,7 @@ fn build_menu_content(
                             mode,
                             &config_for_cat,
                             &fav_flow_for_cat,
+                            &cache_for_cat,
                         );
                     }
                 }
@@ -261,11 +317,12 @@ fn build_menu_content(
     let fav_flow_for_search2 = fav_flow.clone();
     let entries_for_fav_rebuild = entries.clone();
     let app_for_search = app.clone();
+    let cache_for_search = color_cache.clone();
     search_entry.connect_changed(move |entry| {
         let query = entry.text().to_string().to_lowercase();
         if query.is_empty() {
-            populate_app_list(&app_for_search, &app_list_for_search, &entries_for_search, mode, &config_for_search, &fav_flow_for_search);
-            populate_favorites(&fav_flow_for_search2, &entries_for_fav_search, &config_for_search, mode);
+            populate_app_list(&app_for_search, &app_list_for_search, &entries_for_search, mode, &config_for_search, &fav_flow_for_search, &cache_for_search);
+            populate_favorites(&fav_flow_for_search2, &entries_for_fav_search, &config_for_search, mode, &cache_for_search);
         } else {
             let filtered: Vec<AppEntry> = entries_for_search
                 .iter()
@@ -278,7 +335,7 @@ fn build_menu_content(
                 })
                 .cloned()
                 .collect();
-            populate_app_list(&app_for_search, &app_list_for_search, &Rc::new(filtered), mode, &config_for_search, &fav_flow_for_search);
+            populate_app_list(&app_for_search, &app_list_for_search, &Rc::new(filtered), mode, &config_for_search, &fav_flow_for_search, &cache_for_search);
 
             // Filter favorites too
             let fav_names: Vec<String> = config_for_search.borrow().menu.favorites.clone();
@@ -296,7 +353,7 @@ fn build_menu_content(
                 .collect();
             populate_favorites_from_entries(
                 &fav_flow_for_search2, &fav_entries, &config_for_search, mode,
-                &fav_flow_for_search2, &entries_for_fav_rebuild,
+                &fav_flow_for_search2, &entries_for_fav_rebuild, &cache_for_search,
             );
         }
     });
@@ -359,6 +416,7 @@ fn populate_app_list(
     mode: DisplayMode,
     config: &Rc<RefCell<RdmConfig>>,
     fav_flow: &Rc<gtk4::FlowBox>,
+    cache: &ColorCache,
 ) {
     // Clear existing
     while let Some(child) = list.first_child() {
@@ -366,7 +424,7 @@ fn populate_app_list(
     }
 
     for entry in entries.iter() {
-        let row = make_app_row(app, entry, mode, config, entries, fav_flow);
+        let row = make_app_row(app, entry, mode, config, entries, fav_flow, cache);
         list.append(&row);
     }
 }
@@ -378,6 +436,7 @@ fn make_app_row(
     config: &Rc<RefCell<RdmConfig>>,
     all_entries: &Rc<Vec<AppEntry>>,
     fav_flow: &Rc<gtk4::FlowBox>,
+    cache: &ColorCache,
 ) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
     let hbox = gtk4::Box::new(Orientation::Horizontal, 8);
@@ -403,7 +462,7 @@ fn make_app_row(
             let glyph_label = Label::new(Some(&glyph));
             glyph_label.add_css_class("nerd-icon");
             if let Some(ref icon_name) = entry.icon {
-                apply_icon_color(&glyph_label, icon_name);
+                apply_icon_color(&glyph_label, icon_name, cache);
             }
             hbox.append(&glyph_label);
 
@@ -417,7 +476,7 @@ fn make_app_row(
             name_label.add_css_class("menu-app-name");
             name_label.set_halign(gtk4::Align::Start);
             if let Some(ref icon_name) = entry.icon {
-                apply_icon_color(&name_label, icon_name);
+                apply_icon_color(&name_label, icon_name, cache);
             }
             hbox.append(&name_label);
         }
@@ -434,21 +493,36 @@ fn make_app_row(
     });
     row.add_controller(gesture_click);
 
-    // Right-click context menu: add/remove from favorites
+    // Right-click: directly toggle favorite
     let app_name = entry.name.clone();
     let cfg = config.clone();
     let right_click = gtk4::GestureClick::new();
     right_click.set_button(3);
-    let row_weak = row.downgrade();
     let fav_flow_for_ctx = fav_flow.clone();
     let entries_for_ctx = all_entries.clone();
-    right_click.connect_released(move |_, _, x, y| {
-        let Some(row_ref) = row_weak.upgrade() else { return };
-        show_context_menu(
-            &row_ref, x, y, &app_name, &cfg,
-            ContextAction::ToggleFavorite,
-            &fav_flow_for_ctx, &entries_for_ctx, mode,
-        );
+    let hbox_weak = hbox.downgrade();
+    let cache_for_ctx = cache.clone();
+    right_click.connect_released(move |_, _, _, _| {
+        {
+            let mut c = cfg.borrow_mut();
+            if c.menu.favorites.contains(&app_name) {
+                c.menu.favorites.retain(|n| n != &app_name);
+            } else {
+                c.menu.favorites.push(app_name.clone());
+            }
+        }
+        if let Err(e) = cfg.borrow().save() {
+            log::error!("Failed to save favorites: {}", e);
+        }
+        populate_favorites(&fav_flow_for_ctx, &entries_for_ctx, &cfg, mode, &cache_for_ctx);
+        // Brief visual feedback
+        if let Some(hbox_ref) = hbox_weak.upgrade() {
+            hbox_ref.add_css_class("fav-toggled");
+            let hbox_timeout = hbox_ref.clone();
+            gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+                hbox_timeout.remove_css_class("fav-toggled");
+            });
+        }
     });
     row.add_controller(right_click);
 
@@ -500,13 +574,14 @@ fn populate_favorites(
     entries: &Rc<Vec<AppEntry>>,
     config: &Rc<RefCell<RdmConfig>>,
     mode: DisplayMode,
+    cache: &ColorCache,
 ) {
     let fav_names = config.borrow().menu.favorites.clone();
     let fav_entries: Vec<AppEntry> = fav_names
         .iter()
         .filter_map(|name| entries.iter().find(|e| &e.name == name).cloned())
         .collect();
-    populate_favorites_from_entries(flow, &fav_entries, config, mode, flow, entries);
+    populate_favorites_from_entries(flow, &fav_entries, config, mode, flow, entries, cache);
 }
 
 fn populate_favorites_from_entries(
@@ -516,6 +591,7 @@ fn populate_favorites_from_entries(
     mode: DisplayMode,
     fav_flow_rc: &Rc<gtk4::FlowBox>,
     all_entries: &Rc<Vec<AppEntry>>,
+    cache: &ColorCache,
 ) {
     // Clear
     while let Some(child) = flow.first_child() {
@@ -532,7 +608,7 @@ fn populate_favorites_from_entries(
     }
 
     for entry in fav_entries {
-        let tile = make_favorite_tile(entry, mode, config, fav_flow_rc, all_entries);
+        let tile = make_favorite_tile(entry, mode, config, fav_flow_rc, all_entries, cache);
         flow.insert(&tile, -1);
     }
 }
@@ -543,6 +619,7 @@ fn make_favorite_tile(
     config: &Rc<RefCell<RdmConfig>>,
     fav_flow: &Rc<gtk4::FlowBox>,
     all_entries: &Rc<Vec<AppEntry>>,
+    cache: &ColorCache,
 ) -> gtk4::Box {
     let tile = gtk4::Box::new(Orientation::Vertical, 4);
     tile.add_css_class("menu-fav-tile");
@@ -571,7 +648,7 @@ fn make_favorite_tile(
             glyph_label.add_css_class("nerd-icon");
             glyph_label.add_css_class("menu-fav-glyph");
             if let Some(ref icon_name) = entry.icon {
-                apply_icon_color(&glyph_label, icon_name);
+                apply_icon_color(&glyph_label, icon_name, cache);
             }
             glyph_label.set_halign(gtk4::Align::Center);
             tile.append(&glyph_label);
@@ -592,7 +669,7 @@ fn make_favorite_tile(
             name.set_halign(gtk4::Align::Center);
             name.set_valign(gtk4::Align::Center);
             if let Some(ref icon_name) = entry.icon {
-                apply_icon_color(&name, icon_name);
+                apply_icon_color(&name, icon_name, cache);
             }
             tile.append(&name);
         }
@@ -613,113 +690,31 @@ fn make_favorite_tile(
     });
     tile.add_controller(click);
 
-    // Right-click to remove from favorites
+    // Right-click to remove from favorites directly
     let app_name = entry.name.clone();
     let cfg = config.clone();
     let right_click = gtk4::GestureClick::new();
     right_click.set_button(3);
-    let tile_weak = tile.downgrade();
     let fav_flow_for_ctx = fav_flow.clone();
     let entries_for_ctx = all_entries.clone();
-    right_click.connect_released(move |_, _, x, y| {
-        let Some(tile_ref) = tile_weak.upgrade() else { return };
-        show_context_menu(
-            &tile_ref, x, y, &app_name, &cfg,
-            ContextAction::RemoveFavorite,
-            &fav_flow_for_ctx, &entries_for_ctx, mode,
-        );
+    let cache_for_ctx = cache.clone();
+    right_click.connect_released(move |_, _, _, _| {
+        cfg.borrow_mut().menu.favorites.retain(|n| n != &app_name);
+        if let Err(e) = cfg.borrow().save() {
+            log::error!("Failed to save favorites: {}", e);
+        }
+        populate_favorites(&fav_flow_for_ctx, &entries_for_ctx, &cfg, mode, &cache_for_ctx);
     });
     tile.add_controller(right_click);
 
     tile
 }
 
-// ─── Context menu ─────────────────────────────────────────────────
-
-#[derive(Clone, Copy)]
-enum ContextAction {
-    ToggleFavorite,
-    RemoveFavorite,
-}
-
-fn show_context_menu(
-    widget: &impl IsA<gtk4::Widget>,
-    x: f64,
-    y: f64,
-    app_name: &str,
-    config: &Rc<RefCell<RdmConfig>>,
-    action: ContextAction,
-    fav_flow: &Rc<gtk4::FlowBox>,
-    all_entries: &Rc<Vec<AppEntry>>,
-    mode: DisplayMode,
-) {
-    let popover = gtk4::Popover::new();
-    popover.set_parent(widget);
-    popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-
-    let content = gtk4::Box::new(Orientation::Vertical, 0);
-
-    let is_favorite = config.borrow().menu.favorites.contains(&app_name.to_string());
-
-    match action {
-        ContextAction::ToggleFavorite => {
-            let label_text = if is_favorite {
-                "Remove from Favorites"
-            } else {
-                "Add to Favorites"
-            };
-            let btn = gtk4::Button::with_label(label_text);
-            btn.add_css_class("menu-ctx-btn");
-            let name = app_name.to_string();
-            let cfg = config.clone();
-            let pop = popover.clone();
-            let fav = fav_flow.clone();
-            let ents = all_entries.clone();
-            btn.connect_clicked(move |_| {
-                {
-                    let mut c = cfg.borrow_mut();
-                    if c.menu.favorites.contains(&name) {
-                        c.menu.favorites.retain(|n| n != &name);
-                    } else {
-                        c.menu.favorites.push(name.clone());
-                    }
-                }
-                if let Err(e) = cfg.borrow().save() {
-                    log::error!("Failed to save favorites: {}", e);
-                }
-                pop.popdown();
-                populate_favorites(&fav, &ents, &cfg, mode);
-            });
-            content.append(&btn);
-        }
-        ContextAction::RemoveFavorite => {
-            let btn = gtk4::Button::with_label("Remove from Favorites");
-            btn.add_css_class("menu-ctx-btn");
-            let name = app_name.to_string();
-            let cfg = config.clone();
-            let pop = popover.clone();
-            let fav = fav_flow.clone();
-            let ents = all_entries.clone();
-            btn.connect_clicked(move |_| {
-                cfg.borrow_mut().menu.favorites.retain(|n| n != &name);
-                if let Err(e) = cfg.borrow().save() {
-                    log::error!("Failed to save favorites: {}", e);
-                }
-                pop.popdown();
-                populate_favorites(&fav, &ents, &cfg, mode);
-            });
-            content.append(&btn);
-        }
-    }
-
-    popover.set_child(Some(&content));
-    popover.popup();
-}
-
 // ─── Icon color extraction ────────────────────────────────────────
 
-fn apply_icon_color(label: &Label, icon_name: &str) {
-    if let Some(color) = extract_icon_color(icon_name) {
+fn apply_icon_color(label: &Label, icon_name: &str, cache: &ColorCache) {
+    let color = cache.borrow().get(icon_name).copied().flatten();
+    if let Some(color) = color {
         let css = format!(
             "color: rgb({},{},{});",
             (color.0 * 255.0) as u8,
@@ -844,116 +839,7 @@ fn launch_app(exec: &str) {
 
 fn load_css() {
     let css = CssProvider::new();
-    css.load_from_data(
-        r#"
-        .menu-root {
-            background-color: #1a1b26;
-            color: #c0caf5;
-        }
-
-        .menu-search {
-            background-color: #24283b;
-            color: #c0caf5;
-            border: 1px solid #3b4261;
-            border-radius: 8px;
-            padding: 8px 12px;
-            font-size: 14px;
-        }
-
-        .menu-left {
-            background-color: #16161e;
-            padding: 4px 0;
-        }
-
-        .menu-categories row {
-            padding: 4px 0;
-            color: #c0caf5;
-        }
-
-        .menu-categories row:selected {
-            background-color: #3d59a1;
-            color: #ffffff;
-        }
-
-        .menu-apps row {
-            padding: 2px 0;
-            color: #c0caf5;
-        }
-
-        .menu-apps row:hover {
-            background-color: #292e42;
-        }
-
-        .menu-app-name {
-            font-size: 13px;
-            color: #c0caf5;
-        }
-
-        .menu-fav-header {
-            font-size: 16px;
-            font-weight: bold;
-            color: #bb9af7;
-        }
-
-        .menu-fav-tile {
-            background-color: #292e42;
-            border-radius: 8px;
-            padding: 8px;
-        }
-
-        .menu-fav-tile:hover {
-            background-color: #3b4261;
-        }
-
-        .menu-fav-name {
-            font-size: 11px;
-            color: #a9b1d6;
-        }
-
-        .menu-fav-glyph {
-            font-size: 28px;
-        }
-
-        .menu-fav-text-mode {
-            font-size: 14px;
-            font-weight: bold;
-        }
-
-        .menu-hint {
-            color: #565f89;
-            font-size: 11px;
-            font-style: italic;
-        }
-
-        .menu-ctx-btn {
-            background: transparent;
-            color: #c0caf5;
-            border: none;
-            padding: 8px 16px;
-            min-height: 0;
-        }
-
-        .menu-ctx-btn:hover {
-            background-color: #292e42;
-        }
-
-        .nerd-icon {
-            font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
-        }
-
-        .menu-right {
-            background-color: #1a1b26;
-        }
-
-        popover contents {
-            background-color: #1a1b26;
-            color: #c0caf5;
-            border: 1px solid #3b4261;
-            border-radius: 8px;
-            padding: 4px 0;
-        }
-    "#,
-    );
+    css.load_from_data(&rdm_common::theme::load_theme_css());
 
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("No display"),

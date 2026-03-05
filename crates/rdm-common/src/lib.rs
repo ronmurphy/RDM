@@ -1,6 +1,7 @@
 pub mod config;
 pub mod desktop_apps;
 pub mod display;
+pub mod theme;
 
 pub const APP_NAME: &str = "RDM";
 pub const APP_ID: &str = "org.rdm.desktop";

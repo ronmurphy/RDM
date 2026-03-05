@@ -158,14 +158,14 @@ pub fn build_wifi_submenu(app: &gtk4::Application) -> gtk4::gio::Menu {
             populate_wifi_menu(&submenu_ref);
         });
         app.add_action(&refresh_action);
-    }
 
-    // Auto-refresh every 30 seconds
-    let submenu_clone = submenu.clone();
-    gtk4::glib::timeout_add_local(std::time::Duration::from_secs(30), move || {
-        populate_wifi_menu(&submenu_clone);
-        gtk4::glib::ControlFlow::Continue
-    });
+        // Auto-refresh every 30 seconds (only once, not per monitor)
+        let submenu_clone = submenu.clone();
+        gtk4::glib::timeout_add_local(std::time::Duration::from_secs(30), move || {
+            populate_wifi_menu(&submenu_clone);
+            gtk4::glib::ControlFlow::Continue
+        });
+    }
 
     submenu
 }

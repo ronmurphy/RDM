@@ -1,5 +1,8 @@
 # RDM Desktop Configuration
 
+[appearance]
+theme = "tokyo-night"
+
 [panel]
 height = 32
 position = "top"

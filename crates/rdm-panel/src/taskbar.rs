@@ -38,8 +38,17 @@ impl TaskbarWidget {
     }
 }
 
+struct WidgetState {
+    widget: TaskbarWidget,
+    cached_title: String,
+    cached_app_id: String,
+    cached_icon_name: String,
+    cached_activated: bool,
+    cached_minimized: bool,
+}
+
 struct TaskbarState {
-    widgets: HashMap<u32, TaskbarWidget>,
+    widgets: HashMap<u32, WidgetState>,
     last_generation: u64,
 }
 
@@ -104,8 +113,8 @@ fn update_taskbar(
         .cloned()
         .collect();
     for id in stale_ids {
-        if let Some(w) = tb.widgets.remove(&id) {
-            container.remove(w.button());
+        if let Some(ws) = tb.widgets.remove(&id) {
+            container.remove(ws.widget.button());
         }
     }
 
@@ -115,48 +124,78 @@ fn update_taskbar(
             continue;
         }
 
-        if let Some(w) = tb.widgets.get(&id) {
-            update_existing_widget(w, info, mode);
+        if let Some(ws) = tb.widgets.get_mut(&id) {
+            update_existing_widget(ws, info, mode);
         } else {
             let w = create_widget(info, mode, id, action_tx);
             container.append(w.button());
-            tb.widgets.insert(id, w);
+            let icon_name = if mode == TaskbarMode::Icons {
+                resolve_icon_name(&info.app_id)
+            } else {
+                String::new()
+            };
+            tb.widgets.insert(id, WidgetState {
+                widget: w,
+                cached_title: info.title.clone(),
+                cached_app_id: info.app_id.clone(),
+                cached_icon_name: icon_name,
+                cached_activated: info.is_activated,
+                cached_minimized: info.is_minimized,
+            });
         }
     }
 }
 
-fn update_existing_widget(w: &TaskbarWidget, info: &ToplevelInfo, mode: TaskbarMode) {
-    let btn = w.button();
+fn update_existing_widget(ws: &mut WidgetState, info: &ToplevelInfo, mode: TaskbarMode) {
+    let btn = ws.widget.button();
 
-    match (mode, w) {
+    // Only update label/icon when the underlying data actually changed
+    match (mode, &ws.widget) {
         (TaskbarMode::Text, TaskbarWidget::TextButton(b)) => {
-            b.set_label(&truncate_title(&info.title, 25));
+            if ws.cached_title != info.title {
+                b.set_label(&truncate_title(&info.title, 25));
+                ws.cached_title = info.title.clone();
+            }
         }
         (TaskbarMode::Icons, TaskbarWidget::IconButton(_, img)) => {
-            let icon_name = resolve_icon_name(&info.app_id);
-            img.set_icon_name(Some(&icon_name));
+            if ws.cached_app_id != info.app_id {
+                let icon_name = resolve_icon_name(&info.app_id);
+                img.set_icon_name(Some(&icon_name));
+                ws.cached_icon_name = icon_name;
+                ws.cached_app_id = info.app_id.clone();
+            }
         }
         (TaskbarMode::Nerd, TaskbarWidget::NerdButton(b)) => {
-            b.set_label(&nerd_glyph_for(&info.app_id));
+            if ws.cached_app_id != info.app_id {
+                b.set_label(&nerd_glyph_for(&info.app_id));
+                ws.cached_app_id = info.app_id.clone();
+            }
         }
         _ => {}
     }
 
-    // Tooltip: always show full title for icon/nerd modes
-    if mode != TaskbarMode::Text {
+    // Tooltip: only update when title changed
+    if mode != TaskbarMode::Text && ws.cached_title != info.title {
         btn.set_tooltip_text(Some(&info.title));
+        ws.cached_title = info.title.clone();
     }
 
-    // State CSS classes
-    if info.is_activated {
-        btn.add_css_class("active");
-    } else {
-        btn.remove_css_class("active");
+    // State CSS classes: only toggle when state actually changed
+    if ws.cached_activated != info.is_activated {
+        if info.is_activated {
+            btn.add_css_class("active");
+        } else {
+            btn.remove_css_class("active");
+        }
+        ws.cached_activated = info.is_activated;
     }
-    if info.is_minimized {
-        btn.add_css_class("minimized");
-    } else {
-        btn.remove_css_class("minimized");
+    if ws.cached_minimized != info.is_minimized {
+        if info.is_minimized {
+            btn.add_css_class("minimized");
+        } else {
+            btn.remove_css_class("minimized");
+        }
+        ws.cached_minimized = info.is_minimized;
     }
 }
 

@@ -1,0 +1,86 @@
+.menu-root {
+    background-color: @theme_bg;
+    color: @theme_fg;
+}
+
+.menu-search {
+    background-color: #24283b;
+    color: @theme_fg;
+    border: 1px solid @theme_border;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+}
+
+.menu-left {
+    background-color: @theme_deep_bg;
+    padding: 4px 0;
+}
+
+.menu-categories row {
+    padding: 4px 0;
+    color: @theme_fg;
+}
+
+.menu-categories row:selected {
+    background-color: @theme_active;
+    color: #ffffff;
+}
+
+.menu-apps row {
+    padding: 2px 0;
+    color: @theme_fg;
+}
+
+.menu-apps row:hover {
+    background-color: @theme_surface;
+}
+
+.menu-app-name {
+    font-size: 13px;
+    color: @theme_fg;
+}
+
+.menu-fav-header {
+    font-size: 16px;
+    font-weight: bold;
+    color: @theme_purple;
+}
+
+.menu-fav-tile {
+    background-color: @theme_surface;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.menu-fav-tile:hover {
+    background-color: @theme_border;
+}
+
+.menu-fav-name {
+    font-size: 11px;
+    color: @theme_subtle;
+}
+
+.menu-fav-glyph {
+    font-size: 28px;
+}
+
+.menu-fav-text-mode {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.menu-hint {
+    color: @theme_muted;
+    font-size: 11px;
+    font-style: italic;
+}
+
+.fav-toggled {
+    background-color: @theme_active;
+}
+
+.menu-right {
+    background-color: @theme_bg;
+}

@@ -99,6 +99,10 @@ fn build_ui(app: &Application) {
     sidebar.set_stack(&stack);
     sidebar.set_size_request(140, -1);
 
+    // --- Appearance page ---
+    let appearance_page = build_appearance_page(&config);
+    stack.add_titled(&appearance_page, Some("appearance"), "Appearance");
+
     // --- Panel page ---
     let panel_page = build_panel_page(&config);
     stack.add_titled(&panel_page, Some("panel"), "Panel");
@@ -169,6 +173,74 @@ fn build_ui(app: &Application) {
     window.set_child(Some(&main_box));
     load_css();
     window.present();
+}
+
+// ─── Appearance Settings ─────────────────────────────────────────
+
+fn build_appearance_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
+    let page = GtkBox::new(Orientation::Vertical, 16);
+    page.set_margin_top(20);
+    page.set_margin_bottom(20);
+    page.set_margin_start(20);
+    page.set_margin_end(20);
+
+    let header = Label::new(Some("Appearance"));
+    header.add_css_class("settings-header");
+    header.set_halign(gtk4::Align::Start);
+    page.append(&header);
+
+    // Theme selector
+    let theme_row = setting_row("Theme");
+    let themes = rdm_common::theme::list_themes();
+    let theme_names: Vec<String> = themes.iter().map(|t| t.display_name.clone()).collect();
+    let theme_str_refs: Vec<&str> = theme_names.iter().map(|s| s.as_str()).collect();
+    let theme_list = StringList::new(&theme_str_refs);
+    let theme_dropdown = DropDown::new(Some(theme_list), gtk4::Expression::NONE);
+
+    // Set current selection
+    let current = config.borrow().appearance.theme.clone();
+    let selected_idx = themes
+        .iter()
+        .position(|t| t.name == current)
+        .unwrap_or(0) as u32;
+    theme_dropdown.set_selected(selected_idx);
+
+    let cfg = config.clone();
+    let themes_for_handler = themes.clone();
+    theme_dropdown.connect_selected_notify(move |dd| {
+        if let Some(theme) = themes_for_handler.get(dd.selected() as usize) {
+            cfg.borrow_mut().appearance.theme = theme.name.clone();
+        }
+    });
+    theme_row.append(&theme_dropdown);
+    page.append(&theme_row);
+
+    // Description of selected theme
+    if let Some(theme) = themes.get(selected_idx as usize) {
+        if !theme.description.is_empty() {
+            let desc = Label::new(Some(&theme.description));
+            desc.add_css_class("settings-hint");
+            desc.set_halign(gtk4::Align::Start);
+            page.append(&desc);
+        }
+    }
+
+    let hint = Label::new(Some(
+        "Theme changes apply after clicking Apply. All RDM components will restart.",
+    ));
+    hint.add_css_class("settings-hint");
+    hint.set_halign(gtk4::Align::Start);
+    hint.set_margin_top(12);
+    page.append(&hint);
+
+    let user_hint = Label::new(Some(
+        "Custom themes can be added to ~/.config/rdm/themes/",
+    ));
+    user_hint.add_css_class("settings-hint");
+    user_hint.set_halign(gtk4::Align::Start);
+    page.append(&user_hint);
+
+    page
 }
 
 // ─── Panel Settings ──────────────────────────────────────────────
@@ -259,6 +331,36 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     });
     fmt_row.append(&fmt_entry);
     page.append(&fmt_row);
+
+    // ── Launcher section ──
+    let launcher_header = Label::new(Some("Launcher"));
+    launcher_header.add_css_class("settings-header");
+    launcher_header.set_halign(gtk4::Align::Start);
+    launcher_header.set_margin_top(12);
+    page.append(&launcher_header);
+
+    // Launcher position
+    let lpos_row = setting_row("Launcher Position");
+    let positions = StringList::new(&["center", "panel", "full"]);
+    let lpos_dropdown = DropDown::new(Some(positions), gtk4::Expression::NONE);
+    let current_lpos = &config.borrow().menu.launcher_position;
+    lpos_dropdown.set_selected(match current_lpos.as_str() {
+        "center" => 0,
+        "panel" => 1,
+        "full" => 2,
+        _ => 0,
+    });
+    let cfg = config.clone();
+    lpos_dropdown.connect_selected_notify(move |dd| {
+        let pos = match dd.selected() {
+            1 => "panel",
+            2 => "full",
+            _ => "center",
+        };
+        cfg.borrow_mut().menu.launcher_position = pos.to_string();
+    });
+    lpos_row.append(&lpos_dropdown);
+    page.append(&lpos_row);
 
     page
 }
@@ -1205,116 +1307,7 @@ fn apply_changes(config: &RdmConfig) {
 
 fn load_css() {
     let css = CssProvider::new();
-    css.load_from_data(
-        r#"
-        window {
-            background-color: #1a1b26;
-            color: #c0caf5;
-        }
-
-        .settings-header {
-            font-size: 18px;
-            font-weight: bold;
-            color: #7aa2f7;
-            margin-bottom: 4px;
-        }
-
-        .settings-hint {
-            color: #565f89;
-            font-size: 11px;
-            font-style: italic;
-        }
-
-        .wallpaper-path {
-            color: #a9b1d6;
-            font-size: 12px;
-        }
-
-        .display-name {
-            font-size: 14px;
-            font-weight: bold;
-            color: #bb9af7;
-            margin-top: 8px;
-        }
-
-        .display-arrangement {
-            border: 1px solid #3b4261;
-            border-radius: 8px;
-            margin-bottom: 12px;
-        }
-
-        stacksidebar {
-            background-color: #16161e;
-        }
-
-        stacksidebar row {
-            color: #c0caf5;
-            padding: 8px 12px;
-        }
-
-        stacksidebar row:selected {
-            background-color: #3d59a1;
-            color: #ffffff;
-        }
-
-        button {
-            background-color: #292e42;
-            color: #c0caf5;
-            border: 1px solid #3b4261;
-            border-radius: 6px;
-            padding: 4px 12px;
-            min-height: 0;
-        }
-
-        button:hover {
-            background-color: #3b4261;
-        }
-
-        button.suggested-action {
-            background-color: #7aa2f7;
-            color: #1a1b26;
-            border: none;
-        }
-
-        button.suggested-action:hover {
-            background-color: #89b4fa;
-        }
-
-        entry, spinbutton {
-            background-color: #292e42;
-            color: #c0caf5;
-            border: 1px solid #3b4261;
-            border-radius: 6px;
-            padding: 4px 8px;
-            min-height: 24px;
-        }
-
-        dropdown, dropdown button {
-            background-color: #292e42;
-            color: #c0caf5;
-            border: 1px solid #3b4261;
-            border-radius: 6px;
-        }
-
-        switch {
-            background-color: #3b4261;
-        }
-
-        switch:checked {
-            background-color: #7aa2f7;
-        }
-
-        separator {
-            background-color: #3b4261;
-            min-height: 1px;
-            min-width: 1px;
-        }
-
-        label {
-            color: #c0caf5;
-        }
-    "#,
-    );
+    css.load_from_data(&rdm_common::theme::load_theme_css());
 
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("No display"),

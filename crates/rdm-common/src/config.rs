@@ -16,6 +16,8 @@ pub struct RdmConfig {
     #[serde(default)]
     pub menu: MenuConfig,
     #[serde(default)]
+    pub appearance: AppearanceConfig,
+    #[serde(default)]
     pub displays: Vec<DisplayConfig>,
 }
 
@@ -56,6 +58,14 @@ pub struct SnapConfig {
 pub struct MenuConfig {
     #[serde(default)]
     pub favorites: Vec<String>,
+    #[serde(default = "default_launcher_position")]
+    pub launcher_position: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AppearanceConfig {
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 fn default_panel_height() -> i32 { 32 }
@@ -69,6 +79,8 @@ fn default_taskbar_mode() -> String { "icons".into() }
 fn default_wallpaper_path() -> String { String::new() }
 fn default_wallpaper_mode() -> String { "fill".into() }
 fn default_wallpaper_color() -> String { "#1a1b26".into() }
+fn default_launcher_position() -> String { "center".into() }
+fn default_theme() -> String { "tokyo-night".into() }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WallpaperConfig {
@@ -127,6 +139,15 @@ impl Default for MenuConfig {
     fn default() -> Self {
         Self {
             favorites: Vec::new(),
+            launcher_position: default_launcher_position(),
+        }
+    }
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        Self {
+            theme: default_theme(),
         }
     }
 }
@@ -139,6 +160,7 @@ impl Default for RdmConfig {
             snap: SnapConfig::default(),
             wallpaper: WallpaperConfig::default(),
             menu: MenuConfig::default(),
+            appearance: AppearanceConfig::default(),
             displays: Vec::new(),
         }
     }
