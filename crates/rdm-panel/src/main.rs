@@ -285,14 +285,13 @@ impl PanelBackend {
 
 // ─── Taskbar Model ───────────────────────────────────────────────
 
-#[allow(non_upper_case_globals)]
-const Qt_UserRole: i32 = 0x0100;
-const ROLE_WINDOW_ID: i32 = Qt_UserRole + 1;
-const ROLE_TITLE: i32 = Qt_UserRole + 2;
-const ROLE_APP_ID: i32 = Qt_UserRole + 3;
-const ROLE_IS_ACTIVATED: i32 = Qt_UserRole + 4;
-const ROLE_IS_MINIMIZED: i32 = Qt_UserRole + 5;
-const ROLE_NERD_GLYPH: i32 = Qt_UserRole + 6;
+const QT_USER_ROLE: i32 = 0x0100;
+const ROLE_WINDOW_ID: i32 = QT_USER_ROLE + 1;
+const ROLE_TITLE: i32 = QT_USER_ROLE + 2;
+const ROLE_APP_ID: i32 = QT_USER_ROLE + 3;
+const ROLE_IS_ACTIVATED: i32 = QT_USER_ROLE + 4;
+const ROLE_IS_MINIMIZED: i32 = QT_USER_ROLE + 5;
+const ROLE_NERD_GLYPH: i32 = QT_USER_ROLE + 6;
 
 struct TaskbarItem {
     id: u32,
@@ -391,8 +390,8 @@ impl QAbstractListModel for TaskbarModel {
 
 // ─── WiFi Model ──────────────────────────────────────────────────
 
-const WIFI_ROLE_LABEL: i32 = Qt_UserRole + 1;
-const WIFI_ROLE_SSID: i32 = Qt_UserRole + 2;
+const WIFI_ROLE_LABEL: i32 = QT_USER_ROLE + 1;
+const WIFI_ROLE_SSID: i32 = QT_USER_ROLE + 2;
 
 #[derive(QObject, Default)]
 struct WifiModel {
@@ -477,6 +476,8 @@ fn main() {
     wifi_model.borrow_mut().refresh();
 
     let mut engine = QmlEngine::new();
+    // SAFETY: All RefCell objects live on the stack and outlive `engine.exec()`
+    // which blocks until the QML application exits, so pinned references are valid.
     engine.set_object_property("_panel".into(), unsafe { QObjectPinned::new(&panel) });
     engine.set_object_property("_taskbarModel".into(), unsafe {
         QObjectPinned::new(&taskbar_model)

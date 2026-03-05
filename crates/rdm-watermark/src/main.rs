@@ -57,6 +57,8 @@ fn main() {
     });
 
     let mut engine = QmlEngine::new();
+    // SAFETY: `backend` lives on the stack and outlives `engine.exec()` which
+    // blocks until the QML application exits, so the pinned reference is valid.
     engine.set_object_property("_backend".into(), unsafe { QObjectPinned::new(&backend) });
     engine.load_data(WATERMARK_QML.into());
     engine.exec();

@@ -377,6 +377,8 @@ fn main() {
     let backend = RefCell::new(SettingsBackend::from_config(&config));
 
     let mut engine = QmlEngine::new();
+    // SAFETY: `backend` lives on the stack and outlives `engine.exec()` which
+    // blocks until the QML application exits, so the pinned reference is valid.
     engine.set_object_property("_settings".into(), unsafe {
         QObjectPinned::new(&backend)
     });

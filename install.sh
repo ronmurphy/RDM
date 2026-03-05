@@ -51,6 +51,8 @@ if ! $qt_found; then
     missing+=("qt6-declarative (Qt Quick/QML)")
 fi
 
+# layer-shell-qt: pkg-config name varies by distro and Qt version
+# Arch/KDE Plasma 6: "LayerShellQt", some older builds: "LayerShellQtInterface"
 if pkg-config --exists LayerShellQt 2>/dev/null || pkg-config --exists LayerShellQtInterface 2>/dev/null; then
     ok "layer-shell-qt"
 else

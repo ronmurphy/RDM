@@ -116,9 +116,10 @@ pub fn format_network_label(net: &WifiNetwork) -> String {
 }
 
 /// Connect to a WiFi network by SSID.
-/// Known networks connect directly; unknown networks are attempted without
-/// a password (a proper password dialog should be shown by the QML layer for
-/// secured networks, but as a fallback we log a warning).
+/// Known networks connect directly; unknown networks are attempted through
+/// NetworkManager's agent. Unlike the previous GTK version that showed a
+/// built-in password dialog, users now need a NetworkManager authentication
+/// agent running (e.g., polkit agent or nm-applet) for secured networks.
 pub fn connect_network(ssid: &str) {
     if is_known_network(ssid) {
         match connect_known(ssid) {

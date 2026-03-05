@@ -127,12 +127,10 @@ Window {
 
 // ─── App List Model ──────────────────────────────────────────────
 
-const ROLE_NAME: i32 = Qt_UserRole + 1;
-const ROLE_COMMENT: i32 = Qt_UserRole + 2;
-const ROLE_EXEC: i32 = Qt_UserRole + 3;
-
-#[allow(non_upper_case_globals)]
-const Qt_UserRole: i32 = 0x0100;
+const QT_USER_ROLE: i32 = 0x0100;
+const ROLE_NAME: i32 = QT_USER_ROLE + 1;
+const ROLE_COMMENT: i32 = QT_USER_ROLE + 2;
+const ROLE_EXEC: i32 = QT_USER_ROLE + 3;
 
 #[derive(QObject, Default)]
 struct AppListModel {
@@ -278,6 +276,8 @@ fn main() {
     });
 
     let mut engine = QmlEngine::new();
+    // SAFETY: All RefCell objects live on the stack and outlive `engine.exec()`
+    // which blocks until the QML application exits, so pinned references are valid.
     engine.set_object_property("_appModel".into(), unsafe { QObjectPinned::new(&model) });
     engine.set_object_property("_backend".into(), unsafe { QObjectPinned::new(&backend) });
     engine.load_data(LAUNCHER_QML.into());
