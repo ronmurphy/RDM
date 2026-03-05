@@ -1,4 +1,4 @@
-use gtk4::prelude::*;
+use qmetaobject::prelude::*;
 use std::path::Path;
 
 /// Battery state read from sysfs
@@ -58,125 +58,87 @@ fn battery_icon(capacity: u8, charging: bool) -> &'static str {
     }
 }
 
-/// Color for battery level
-fn battery_css_class(capacity: u8, charging: bool) -> &'static str {
+/// Color hex for battery level
+fn battery_color_hex(capacity: u8, charging: bool) -> &'static str {
     if charging {
-        "battery-charging"
+        "#7dcfff"
     } else if capacity <= 10 {
-        "battery-critical"
+        "#f7768e"
     } else if capacity <= 25 {
-        "battery-low"
+        "#e0af68"
     } else {
-        "battery-normal"
+        "#9ece6a"
     }
 }
 
-/// Build the system tray: single menu button with battery info + session submenu.
-pub fn setup_tray(app: &gtk4::Application) -> gtk4::MenuButton {
-    let tray_btn = gtk4::MenuButton::new();
-    tray_btn.add_css_class("tray-btn");
-    tray_btn.add_css_class("nerd-icon");
+// ─── QML-exposed tray backend ────────────────────────────────────
 
-    let menu = gtk4::gio::Menu::new();
+#[derive(QObject, Default)]
+pub struct TrayBackend {
+    base: qt_base_class!(trait QObject),
 
-    // --- Battery section (if present) ---
-    let bat = read_battery();
-    if bat.present {
-        let battery_section = gtk4::gio::Menu::new();
-        let bat_label = battery_menu_label(&bat);
-        // Battery item is just informational — uses a no-op action
-        battery_section.append(Some(&bat_label), Some("app.battery-info"));
-        menu.append_section(None, &battery_section);
+    tray_label: qt_property!(QString; NOTIFY tray_changed),
+    battery_menu_label: qt_property!(QString; NOTIFY tray_changed),
+    battery_color: qt_property!(QString; NOTIFY tray_changed),
+    battery_present: qt_property!(bool; NOTIFY tray_changed),
 
-        // No-op action for battery display
-        let battery_action = gtk4::gio::SimpleAction::new("battery-info", None);
-        battery_action.set_enabled(false);
-        app.add_action(&battery_action);
+    tray_changed: qt_signal!(),
 
-        // Update the tray button label with battery info and refresh menu periodically
-        update_tray_button(&tray_btn, &bat);
+    update_battery: qt_method!(fn(&mut self)),
+    lock: qt_method!(fn(&self)),
+    logout: qt_method!(fn(&self)),
+    reboot: qt_method!(fn(&self)),
+    shutdown: qt_method!(fn(&self)),
+}
 
-        let btn_clone = tray_btn.clone();
-        let menu_ref = menu.clone();
-        gtk4::glib::timeout_add_local(std::time::Duration::from_secs(30), move || {
-            let bat = read_battery();
-            update_tray_button(&btn_clone, &bat);
-            // Update battery item label — replace section 0 entirely
-            if menu_ref.n_items() > 0 {
-                menu_ref.remove(0);
-                let bat_section = gtk4::gio::Menu::new();
-                bat_section.append(Some(&battery_menu_label(&bat)), Some("app.battery-info"));
-                menu_ref.insert_section(0, None, &bat_section);
-            }
-            gtk4::glib::ControlFlow::Continue
-        });
-    } else {
-        // No battery — just show power icon
-        tray_btn.set_label("\u{f0425}"); // 󰐥
+impl TrayBackend {
+    pub fn new() -> Self {
+        let bat = read_battery();
+        let mut backend = Self::default();
+        backend.apply_battery(&bat);
+        backend
     }
 
-    // --- WiFi submenu ---
-    let wifi_submenu = crate::wifi::build_wifi_submenu(app);
-    menu.append_submenu(Some("\u{f05a9}  WiFi"), &wifi_submenu);
+    fn apply_battery(&mut self, bat: &BatteryState) {
+        if bat.present {
+            let icon = battery_icon(bat.capacity, bat.charging);
+            self.tray_label = QString::from(format!("{} {}%", icon, bat.capacity).as_str());
+            let status = if bat.charging { "Charging" } else { "Battery" };
+            self.battery_menu_label =
+                QString::from(format!("{}  {} {}%", icon, status, bat.capacity).as_str());
+            self.battery_color = QString::from(battery_color_hex(bat.capacity, bat.charging));
+            self.battery_present = true;
+        } else {
+            self.tray_label = QString::from("\u{f0425}"); // 󰐥
+            self.battery_menu_label = QString::from("AC Power");
+            self.battery_color = QString::from("#9ece6a");
+            self.battery_present = false;
+        }
+    }
 
-    // --- Session submenu ---
-    let session_submenu = gtk4::gio::Menu::new();
-    session_submenu.append(Some("\u{f033e}  Lock"), Some("app.lock"));
-    session_submenu.append(Some("\u{f0343}  Logout"), Some("app.logout"));
-    session_submenu.append(Some("\u{f0709}  Reboot"), Some("app.reboot"));
-    session_submenu.append(Some("\u{f0425}  Shutdown"), Some("app.shutdown"));
+    fn update_battery(&mut self) {
+        let bat = read_battery();
+        self.apply_battery(&bat);
+        self.tray_changed();
+    }
 
-    menu.append_submenu(Some("\u{f0425}  Session"), &session_submenu);
-
-    tray_btn.set_menu_model(Some(&menu));
-
-    // --- Wire up session actions ---
-    let action_lock = gtk4::gio::SimpleAction::new("lock", None);
-    action_lock.connect_activate(|_, _| {
+    fn lock(&self) {
         if let Err(e) = std::process::Command::new("swaylock").spawn() {
             log::error!("Failed to lock: {}", e);
         }
-    });
-
-    let action_logout = gtk4::gio::SimpleAction::new("logout", None);
-    action_logout.connect_activate(|_, _| {
-        let _ = std::process::Command::new("labwc").arg("--exit").spawn();
-    });
-
-    let action_reboot = gtk4::gio::SimpleAction::new("reboot", None);
-    action_reboot.connect_activate(|_, _| {
-        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
-    });
-
-    let action_shutdown = gtk4::gio::SimpleAction::new("shutdown", None);
-    action_shutdown.connect_activate(|_, _| {
-        let _ = std::process::Command::new("systemctl").arg("poweroff").spawn();
-    });
-
-    app.add_action(&action_lock);
-    app.add_action(&action_logout);
-    app.add_action(&action_reboot);
-    app.add_action(&action_shutdown);
-
-    tray_btn
-}
-
-fn battery_menu_label(bat: &BatteryState) -> String {
-    let icon = battery_icon(bat.capacity, bat.charging);
-    let status = if bat.charging { "Charging" } else { "Battery" };
-    format!("{}  {} {}%", icon, status, bat.capacity)
-}
-
-fn update_tray_button(btn: &gtk4::MenuButton, bat: &BatteryState) {
-    let icon = battery_icon(bat.capacity, bat.charging);
-    btn.set_label(&format!("{} {}%", icon, bat.capacity));
-
-    // Color the button based on battery state
-    for cls in &["battery-normal", "battery-low", "battery-critical", "battery-charging"] {
-        btn.remove_css_class(cls);
     }
-    btn.add_css_class(battery_css_class(bat.capacity, bat.charging));
 
-    let status = if bat.charging { "Charging" } else { "On battery" };
-    btn.set_tooltip_text(Some(&format!("{}  —  {}%", status, bat.capacity)));
+    fn logout(&self) {
+        let _ = std::process::Command::new("labwc").arg("--exit").spawn();
+    }
+
+    fn reboot(&self) {
+        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+    }
+
+    fn shutdown(&self) {
+        let _ = std::process::Command::new("systemctl")
+            .arg("poweroff")
+            .spawn();
+    }
 }

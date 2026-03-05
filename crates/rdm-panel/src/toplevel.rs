@@ -23,16 +23,16 @@ pub struct ToplevelInfo {
     pub is_fullscreen: bool,
 }
 
-/// Actions the GTK side can request on a toplevel
+/// Actions the UI side can request on a toplevel
 pub enum ToplevelAction {
     Activate(u32),
     Close(u32),
 }
 
-/// Snapshot of all toplevels for the GTK side to consume
+/// Snapshot of all toplevels for the UI side to consume
 pub type ToplevelMap = HashMap<u32, ToplevelInfo>;
 
-/// Shared state between the Wayland thread and the GTK thread
+/// Shared state between the Wayland thread and the UI thread
 pub struct SharedState {
     pub toplevels: ToplevelMap,
     pub generation: u64,
@@ -215,7 +215,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for WaylandState {
 }
 
 /// Start the Wayland toplevel tracking thread.
-/// Returns the shared state and an action sender for the GTK side.
+/// Returns the shared state and an action sender for the UI side.
 pub fn start_toplevel_tracker() -> (Arc<Mutex<SharedState>>, std::sync::mpsc::Sender<ToplevelAction>)
 {
     let shared = Arc::new(Mutex::new(SharedState {
@@ -315,7 +315,7 @@ fn run_wayland_loop(
     log::info!("Foreign toplevel manager bound — tracking windows");
 
     loop {
-        // Process any pending actions from GTK
+        // Process any pending actions from the UI
         state.process_actions();
 
         // Blocking dispatch with a short timeout so we can also check actions

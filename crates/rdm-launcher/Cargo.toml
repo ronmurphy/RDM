@@ -8,8 +8,8 @@ name = "rdm-launcher"
 path = "src/main.rs"
 
 [dependencies]
-gtk4 = { workspace = true }
-gtk4-layer-shell = { workspace = true }
+qmetaobject = { workspace = true }
+qttypes = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 freedesktop-desktop-entry = { workspace = true }
