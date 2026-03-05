@@ -1,6 +1,7 @@
 mod clock;
 mod taskbar;
 mod toplevel;
+mod tray;
 
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation};
@@ -85,47 +86,9 @@ fn build_panel(app: &Application, config: &RdmConfig) {
         hbox.append(&clock_label);
     }
 
-    // Right: power menu
-    let power_btn = gtk4::MenuButton::new();
-    power_btn.set_label("\u{23FB}"); // ⏻ power symbol
-    power_btn.add_css_class("power-btn");
-
-    let power_menu = gtk4::gio::Menu::new();
-    power_menu.append(Some("Lock"), Some("app.lock"));
-    power_menu.append(Some("Logout"), Some("app.logout"));
-    power_menu.append(Some("Reboot"), Some("app.reboot"));
-    power_menu.append(Some("Shutdown"), Some("app.shutdown"));
-    power_btn.set_menu_model(Some(&power_menu));
-
-    // Wire up actions
-    let action_lock = gtk4::gio::SimpleAction::new("lock", None);
-    action_lock.connect_activate(|_, _| {
-        if let Err(e) = std::process::Command::new("swaylock").spawn() {
-            log::error!("Failed to lock: {}", e);
-        }
-    });
-
-    let action_logout = gtk4::gio::SimpleAction::new("logout", None);
-    action_logout.connect_activate(|_, _| {
-        let _ = std::process::Command::new("labwc").arg("--exit").spawn();
-    });
-
-    let action_reboot = gtk4::gio::SimpleAction::new("reboot", None);
-    action_reboot.connect_activate(|_, _| {
-        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
-    });
-
-    let action_shutdown = gtk4::gio::SimpleAction::new("shutdown", None);
-    action_shutdown.connect_activate(|_, _| {
-        let _ = std::process::Command::new("systemctl").arg("poweroff").spawn();
-    });
-
-    app.add_action(&action_lock);
-    app.add_action(&action_logout);
-    app.add_action(&action_reboot);
-    app.add_action(&action_shutdown);
-
-    hbox.append(&power_btn);
+    // Right: system tray (battery + power menu)
+    let tray = tray::setup_tray(app);
+    hbox.append(&tray);
 
     window.set_child(Some(&hbox));
 
@@ -210,6 +173,36 @@ fn load_css() {
             min-width: 1px;
         }
 
+        .tray {
+            padding: 0 4px;
+        }
+
+        .nerd-icon {
+            font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
+        }
+
+        .tray-battery {
+            padding: 4px 8px;
+            font-size: 13px;
+            min-height: 0;
+        }
+
+        .battery-normal {
+            color: #9ece6a;
+        }
+
+        .battery-low {
+            color: #e0af68;
+        }
+
+        .battery-critical {
+            color: #f7768e;
+        }
+
+        .battery-charging {
+            color: #7dcfff;
+        }
+
         .power-btn {
             background: transparent;
             color: #f7768e;
@@ -236,6 +229,7 @@ fn load_css() {
             padding: 6px 16px;
             color: #c0caf5;
             min-height: 0;
+            font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
         }
 
         popover modelbutton:hover {
