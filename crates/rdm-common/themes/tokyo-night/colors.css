@@ -1,4 +1,4 @@
-/* Tokyo Night color palette */
+/* Tokyo Night — Color Palette */
 @define-color theme_bg #1a1b26;
 @define-color theme_fg #c0caf5;
 @define-color theme_surface #292e42;
@@ -14,3 +14,5 @@
 @define-color theme_red #f7768e;
 @define-color theme_cyan #7dcfff;
 @define-color theme_purple #bb9af7;
+@define-color theme_suggested_fg @theme_bg;
+@define-color theme_contrast_fg #ffffff;

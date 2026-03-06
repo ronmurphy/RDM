@@ -1,0 +1,18 @@
+/* Windows 10 — Color Palette */
+@define-color theme_bg #1e1e1e;
+@define-color theme_fg #ffffff;
+@define-color theme_surface #2d2d2d;
+@define-color theme_border #3f3f3f;
+@define-color theme_active #0078d4;
+@define-color theme_accent #0078d4;
+@define-color theme_accent_hover #1a8cde;
+@define-color theme_deep_bg #171717;
+@define-color theme_muted #888888;
+@define-color theme_subtle #cccccc;
+@define-color theme_green #16c60c;
+@define-color theme_yellow #f9f1a5;
+@define-color theme_red #e81123;
+@define-color theme_cyan #3b78ff;
+@define-color theme_purple #b4009e;
+@define-color theme_suggested_fg #ffffff;
+@define-color theme_contrast_fg #ffffff;

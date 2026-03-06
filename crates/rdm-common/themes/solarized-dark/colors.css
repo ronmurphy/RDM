@@ -1,0 +1,18 @@
+/* Solarized Dark — Color Palette */
+@define-color theme_bg #002b36;
+@define-color theme_fg #839496;
+@define-color theme_surface #073642;
+@define-color theme_border #586e75;
+@define-color theme_active #268bd2;
+@define-color theme_accent #268bd2;
+@define-color theme_accent_hover #6c98b7;
+@define-color theme_deep_bg #001e26;
+@define-color theme_muted #586e75;
+@define-color theme_subtle #93a1a1;
+@define-color theme_green #859900;
+@define-color theme_yellow #b58900;
+@define-color theme_red #dc322f;
+@define-color theme_cyan #2aa198;
+@define-color theme_purple #d33682;
+@define-color theme_suggested_fg @theme_bg;
+@define-color theme_contrast_fg @theme_bg;

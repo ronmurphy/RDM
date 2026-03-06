@@ -1,0 +1,11 @@
+/* Windows 10 — Overrides
+   Sharp corners, minimal rounding to match the Win10 aesthetic. */
+
+button                  { border-radius: 2px; }
+entry, spinbutton       { border-radius: 2px; }
+dropdown, dropdown button { border-radius: 2px; }
+popover contents        { border-radius: 4px; }
+.taskbar-item           { border-radius: 2px; }
+.menu-search            { border-radius: 4px; }
+.menu-fav-tile          { border-radius: 4px; }
+.display-arrangement    { border-radius: 4px; }

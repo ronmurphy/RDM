@@ -1,0 +1,18 @@
+/* macOS — Color Palette */
+@define-color theme_bg #1e1e1e;
+@define-color theme_fg #e5e5e5;
+@define-color theme_surface #2a2a2a;
+@define-color theme_border #3a3a3a;
+@define-color theme_active #0a84ff;
+@define-color theme_accent #007aff;
+@define-color theme_accent_hover #3395ff;
+@define-color theme_deep_bg #161616;
+@define-color theme_muted #808080;
+@define-color theme_subtle #b0b0b0;
+@define-color theme_green #30d158;
+@define-color theme_yellow #ffd60a;
+@define-color theme_red #ff453a;
+@define-color theme_cyan #64d2ff;
+@define-color theme_purple #bf5af2;
+@define-color theme_suggested_fg #ffffff;
+@define-color theme_contrast_fg #ffffff;

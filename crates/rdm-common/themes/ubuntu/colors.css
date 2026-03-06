@@ -1,0 +1,18 @@
+/* Ubuntu — Color Palette */
+@define-color theme_bg #300a24;
+@define-color theme_fg #ffffff;
+@define-color theme_surface #3d1635;
+@define-color theme_border #5e2750;
+@define-color theme_active #e95420;
+@define-color theme_accent #e95420;
+@define-color theme_accent_hover #f47d4a;
+@define-color theme_deep_bg #250820;
+@define-color theme_muted #9b8e98;
+@define-color theme_subtle #ddd8db;
+@define-color theme_green #3eb34f;
+@define-color theme_yellow #f99b11;
+@define-color theme_red #e0321c;
+@define-color theme_cyan #19b6ee;
+@define-color theme_purple #924d8b;
+@define-color theme_suggested_fg @theme_fg;
+@define-color theme_contrast_fg #ffffff;

@@ -1,21 +1,17 @@
-/* Dracula — RDM theme */
+/* ══════════════════════════════════════════════════════════════════
+   RDM — Shared Style
+   ──────────────────────────────────────────────────────────────────
+   Loaded AFTER the theme's colors.css and BEFORE its overrides.css.
+   All visual rules live here; themes only define color variables
+   and (optionally) override shapes / sizes in overrides.css.
 
-/* ── Color Palette ─────────────────────────────────────────────── */
-@define-color theme_bg #282a36;
-@define-color theme_fg #f8f8f2;
-@define-color theme_surface #44475a;
-@define-color theme_border #6272a4;
-@define-color theme_active #6272a4;
-@define-color theme_accent #bd93f9;
-@define-color theme_accent_hover #caa9fa;
-@define-color theme_deep_bg #21222c;
-@define-color theme_muted #6272a4;
-@define-color theme_subtle #f8f8f2;
-@define-color theme_green #50fa7b;
-@define-color theme_yellow #f1fa8c;
-@define-color theme_red #ff5555;
-@define-color theme_cyan #8be9fd;
-@define-color theme_purple #ff79c6;
+   Expected color variables (defined in each theme's colors.css):
+     @theme_bg, @theme_fg, @theme_surface, @theme_border,
+     @theme_active, @theme_accent, @theme_accent_hover,
+     @theme_deep_bg, @theme_muted, @theme_subtle,
+     @theme_green, @theme_yellow, @theme_red, @theme_cyan,
+     @theme_purple, @theme_suggested_fg, @theme_contrast_fg
+   ══════════════════════════════════════════════════════════════════ */
 
 /* ── Common ────────────────────────────────────────────────────── */
 .nerd-icon {
@@ -52,7 +48,7 @@ button:hover {
 
 button.suggested-action {
     background-color: @theme_accent;
-    color: @theme_bg;
+    color: @theme_suggested_fg;
     border: none;
 }
 
@@ -149,7 +145,7 @@ popover modelbutton:hover {
 
 .taskbar-item.active {
     background-color: @theme_active;
-    color: #ffffff;
+    color: @theme_contrast_fg;
 }
 
 .taskbar-item.minimized {
@@ -168,6 +164,7 @@ popover modelbutton:hover {
     font-size: 16px;
 }
 
+/* ── Clock / Calendar ──────────────────────────────────────────── */
 .clock.tray-btn {
     color: @theme_subtle;
 }
@@ -231,6 +228,7 @@ calendar label.other-month {
     color: @theme_muted;
 }
 
+/* ── System Tray ───────────────────────────────────────────────── */
 .tray-btn {
     background: transparent;
     color: @theme_green;
@@ -289,7 +287,7 @@ calendar label.other-month {
 
 .menu-categories row:selected {
     background-color: @theme_active;
-    color: #ffffff;
+    color: @theme_contrast_fg;
 }
 
 .menu-apps row {
@@ -393,7 +391,7 @@ stacksidebar row {
 
 stacksidebar row:selected {
     background-color: @theme_active;
-    color: #ffffff;
+    color: @theme_contrast_fg;
 }
 
 /* ── Watermark ─────────────────────────────────────────────────── */

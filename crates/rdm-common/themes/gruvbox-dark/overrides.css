@@ -1,0 +1,10 @@
+/* Gruvbox Dark — Overrides
+   Slightly less rounding than the default. */
+
+button                  { border-radius: 4px; }
+entry, spinbutton       { border-radius: 4px; }
+dropdown, dropdown button { border-radius: 4px; }
+popover contents        { border-radius: 6px; }
+.menu-search            { border-radius: 6px; }
+.menu-fav-tile          { border-radius: 6px; }
+.display-arrangement    { border-radius: 6px; }

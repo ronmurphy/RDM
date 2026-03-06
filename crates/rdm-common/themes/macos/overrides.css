@@ -1,0 +1,11 @@
+/* macOS — Overrides
+   Extra-rounded corners for the macOS pill-button look. */
+
+button                  { border-radius: 8px; }
+entry, spinbutton       { border-radius: 8px; }
+dropdown, dropdown button { border-radius: 8px; }
+popover contents        { border-radius: 10px; }
+.taskbar-item           { border-radius: 6px; }
+.menu-search            { border-radius: 10px; }
+.menu-fav-tile          { border-radius: 10px; }
+.display-arrangement    { border-radius: 10px; }

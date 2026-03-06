@@ -1,0 +1,18 @@
+/* Gruvbox Dark — Color Palette */
+@define-color theme_bg #282828;
+@define-color theme_fg #ebdbb2;
+@define-color theme_surface #3c3836;
+@define-color theme_border #504945;
+@define-color theme_active #d65d0e;
+@define-color theme_accent #d65d0e;
+@define-color theme_accent_hover #fe8019;
+@define-color theme_deep_bg #1d2021;
+@define-color theme_muted #928374;
+@define-color theme_subtle #d5c4a1;
+@define-color theme_green #b8bb26;
+@define-color theme_yellow #fabd2f;
+@define-color theme_red #fb4934;
+@define-color theme_cyan #83a598;
+@define-color theme_purple #d3869b;
+@define-color theme_suggested_fg @theme_bg;
+@define-color theme_contrast_fg @theme_fg;

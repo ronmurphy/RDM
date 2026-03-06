@@ -1,0 +1,18 @@
+/* Dracula — Color Palette */
+@define-color theme_bg #282a36;
+@define-color theme_fg #f8f8f2;
+@define-color theme_surface #44475a;
+@define-color theme_border #6272a4;
+@define-color theme_active #bd93f9;
+@define-color theme_accent #bd93f9;
+@define-color theme_accent_hover #caa9fa;
+@define-color theme_deep_bg #21222c;
+@define-color theme_muted #6272a4;
+@define-color theme_subtle #d0d0d0;
+@define-color theme_green #50fa7b;
+@define-color theme_yellow #f1fa8c;
+@define-color theme_red #ff5555;
+@define-color theme_cyan #8be9fd;
+@define-color theme_purple #ff79c6;
+@define-color theme_suggested_fg @theme_bg;
+@define-color theme_contrast_fg #ffffff;

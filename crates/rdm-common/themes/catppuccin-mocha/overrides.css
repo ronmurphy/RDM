@@ -1,0 +1,7 @@
+/* Catppuccin Mocha — Overrides
+   Slightly rounder controls than the default. */
+
+button                  { border-radius: 8px; }
+entry, spinbutton       { border-radius: 8px; }
+dropdown, dropdown button { border-radius: 8px; }
+.taskbar-item           { border-radius: 6px; }
