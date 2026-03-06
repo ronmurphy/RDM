@@ -10,12 +10,37 @@ use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
 use rdm_common::theme::ThemeLayout;
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 fn main() {
     env_logger::init();
     log::info!("Starting RDM Panel");
+
+    if !is_rdm_session() {
+        log::warn!(
+            "Not starting rdm-panel: non-RDM desktop detected (RDM_SESSION={:?}, XDG_SESSION_TYPE={:?}, XDG_CURRENT_DESKTOP={:?}, XDG_SESSION_DESKTOP={:?}, DESKTOP_SESSION={:?})",
+            env::var("RDM_SESSION").ok(),
+            env::var("XDG_SESSION_TYPE").ok(),
+            env::var("XDG_CURRENT_DESKTOP").ok(),
+            env::var("XDG_SESSION_DESKTOP").ok(),
+            env::var("DESKTOP_SESSION").ok()
+        );
+        return;
+    }
+    if !has_rdm_session_ancestor() {
+        log::warn!(
+            "Not starting rdm-panel: parent chain does not include rdm-session ({})",
+            parent_chain_summary(16)
+        );
+        return;
+    }
+    if !toplevel::can_bind_foreign_toplevel_manager() {
+        log::warn!("Not starting rdm-panel: compositor does not expose zwlr_foreign_toplevel_manager_v1");
+        return;
+    }
 
     let config = RdmConfig::load();
 
@@ -26,6 +51,88 @@ fn main() {
     let cfg = config.clone();
     app.connect_activate(move |app| build_panel(app, &cfg));
     app.run();
+}
+
+fn is_rdm_session() -> bool {
+    let has_session_marker = env::var("RDM_SESSION")
+        .ok()
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    let is_wayland = env::var("XDG_SESSION_TYPE")
+        .ok()
+        .map(|value| value.trim().eq_ignore_ascii_case("wayland"))
+        .unwrap_or(false);
+
+    let has_rdm_desktop_marker = ["XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION"]
+        .iter()
+        .any(|name| {
+        env::var(name)
+            .ok()
+            .map(|value| {
+                value
+                    .split(':')
+                    .any(|part| part.trim().eq_ignore_ascii_case("rdm"))
+            })
+            .unwrap_or(false)
+    });
+
+    has_session_marker && is_wayland && has_rdm_desktop_marker
+}
+
+fn has_rdm_session_ancestor() -> bool {
+    parent_chain(16)
+        .iter()
+        .skip(1)
+        .any(|(_, comm)| comm == "rdm-session")
+}
+
+fn parent_chain_summary(max_depth: usize) -> String {
+    let chain = parent_chain(max_depth);
+    if chain.is_empty() {
+        return "unavailable".to_string();
+    }
+    chain
+        .into_iter()
+        .map(|(pid, comm)| format!("{pid}:{comm}"))
+        .collect::<Vec<_>>()
+        .join(" -> ")
+}
+
+fn parent_chain(max_depth: usize) -> Vec<(u32, String)> {
+    let mut chain = Vec::new();
+    let mut pid = std::process::id();
+
+    for _ in 0..max_depth {
+        let Some(comm) = read_proc_comm(pid) else {
+            break;
+        };
+        chain.push((pid, comm));
+
+        let Some(ppid) = read_proc_ppid(pid) else {
+            break;
+        };
+        if ppid == 0 || ppid == 1 || ppid == pid {
+            break;
+        }
+        pid = ppid;
+    }
+
+    chain
+}
+
+fn read_proc_comm(pid: u32) -> Option<String> {
+    let path = format!("/proc/{pid}/comm");
+    fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+fn read_proc_ppid(pid: u32) -> Option<u32> {
+    let path = format!("/proc/{pid}/stat");
+    let stat = fs::read_to_string(path).ok()?;
+    let (_, rest) = stat.split_once(") ")?;
+    let mut fields = rest.split_whitespace();
+    let _state = fields.next()?;
+    fields.next()?.parse::<u32>().ok()
 }
 
 fn build_panel(app: &Application, config: &RdmConfig) {

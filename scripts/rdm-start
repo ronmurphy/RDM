@@ -6,7 +6,10 @@
 set -e
 
 export XDG_CURRENT_DESKTOP=RDM
+export XDG_SESSION_DESKTOP=RDM
+export DESKTOP_SESSION=RDM
 export XDG_SESSION_TYPE=wayland
+export RDM_SESSION=1
 
 # Ensure config directory exists
 RDM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"

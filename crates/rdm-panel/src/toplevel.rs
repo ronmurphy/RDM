@@ -268,6 +268,50 @@ pub fn start_toplevel_tracker() -> (
     (shared, action_tx)
 }
 
+/// Lightweight capability probe used by startup guards.
+pub fn can_bind_foreign_toplevel_manager() -> bool {
+    let conn = match Connection::connect_to_env() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Wayland connection probe failed: {}", e);
+            return false;
+        }
+    };
+
+    let (globals, mut event_queue): (_, EventQueue<WaylandState>) = match registry_queue_init(&conn)
+    {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("Wayland registry probe failed: {}", e);
+            return false;
+        }
+    };
+    let qh = event_queue.handle();
+
+    if globals
+        .bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ())
+        .is_err()
+    {
+        return false;
+    }
+
+    let (_action_tx, action_rx) = std::sync::mpsc::channel();
+    let mut state = WaylandState {
+        shared: Arc::new(Mutex::new(SharedState {
+            toplevels: HashMap::new(),
+            generation: 0,
+        })),
+        handles: HashMap::new(),
+        next_id: 1,
+        obj_to_id: HashMap::new(),
+        seat: None,
+        action_rx,
+        id_to_handle: HashMap::new(),
+    };
+
+    event_queue.roundtrip(&mut state).is_ok()
+}
+
 fn run_wayland_loop(
     shared: Arc<Mutex<SharedState>>,
     action_rx: std::sync::mpsc::Receiver<ToplevelAction>,

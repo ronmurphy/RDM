@@ -201,6 +201,9 @@ fn spawn_process(entry: &AutostartEntry) -> Option<Child> {
 
     Command::new(&entry.command)
         .args(&args)
+        // Keep a stable RDM marker on managed children even if the session manager
+        // itself was started before newer env exports were introduced.
+        .env("RDM_SESSION", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
