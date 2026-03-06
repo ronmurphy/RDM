@@ -131,9 +131,9 @@ pub fn map_category(categories: &[String]) -> &'static str {
             "Development" | "IDE" | "TextEditor" | "Debugger" | "WebDevelopment" => {
                 return "Development"
             }
-            "Game" | "ActionGame" | "AdventureGame" | "ArcadeGame" | "BoardGame"
-            | "BlocksGame" | "CardGame" | "LogicGame" | "RolePlaying" | "Simulation"
-            | "SportsGame" | "StrategyGame" => return "Games",
+            "Game" | "ActionGame" | "AdventureGame" | "ArcadeGame" | "BoardGame" | "BlocksGame"
+            | "CardGame" | "LogicGame" | "RolePlaying" | "Simulation" | "SportsGame"
+            | "StrategyGame" => return "Games",
             "Graphics" | "Photography" | "2DGraphics" | "3DGraphics" | "RasterGraphics"
             | "VectorGraphics" | "Scanning" => return "Graphics",
             "Network" | "WebBrowser" | "Email" | "Chat" | "InstantMessaging" | "IRCClient"
@@ -147,8 +147,8 @@ pub fn map_category(categories: &[String]) -> &'static str {
             }
             "System" | "FileManager" | "TerminalEmulator" | "Monitor" | "PackageManager"
             | "Emulator" => return "System",
-            "Utility" | "Archiving" | "Calculator" | "Clock" | "TextTools"
-            | "FileTools" | "Compression" => return "Utilities",
+            "Utility" | "Archiving" | "Calculator" | "Clock" | "TextTools" | "FileTools"
+            | "Compression" => return "Utilities",
             _ => {}
         }
     }

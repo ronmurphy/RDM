@@ -1,7 +1,5 @@
 use gtk4::prelude::*;
-use gtk4::{
-    Application, ApplicationWindow, CssProvider, Label, Orientation, ScrolledWindow,
-};
+use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation, ScrolledWindow};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
 use rdm_common::desktop_apps::{self, AppEntry};
@@ -48,6 +46,7 @@ fn main() {
 fn build_launcher(app: &Application, config: &RdmConfig) {
     let mode = DisplayMode::from_str(&config.panel.taskbar_mode);
     let launcher_pos = config.menu.launcher_position.clone();
+    let layout = rdm_common::theme::load_active_theme_layout();
     let is_full = launcher_pos == "full";
     let config = Rc::new(RefCell::new(config.clone()));
 
@@ -112,7 +111,7 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
     });
 
     // Build content
-    let content = build_menu_content(app, &config, mode, is_full);
+    let content = build_menu_content(app, &config, mode, is_full, &layout);
     window.set_child(Some(&content));
 
     load_css();
@@ -146,6 +145,7 @@ fn build_menu_content(
     config: &Rc<RefCell<RdmConfig>>,
     mode: DisplayMode,
     _is_full: bool,
+    layout: &rdm_common::theme::ThemeLayout,
 ) -> gtk4::Box {
     let root = gtk4::Box::new(Orientation::Vertical, 0);
     root.add_css_class("menu-root");
@@ -165,13 +165,17 @@ fn build_menu_content(
     settings_btn.connect_clicked(|_| {
         let _ = std::process::Command::new("rdm-settings").spawn();
     });
-    top_bar.append(&settings_btn);
-
     let search_entry = gtk4::Entry::new();
     search_entry.set_placeholder_text(Some("Search applications..."));
     search_entry.add_css_class("menu-search");
     search_entry.set_hexpand(true);
-    top_bar.append(&search_entry);
+    if layout.launcher.settings_side == "right" {
+        top_bar.append(&search_entry);
+        top_bar.append(&settings_btn);
+    } else {
+        top_bar.append(&settings_btn);
+        top_bar.append(&search_entry);
+    }
     root.append(&top_bar);
 
     // Main split: left (categories + app list) | right (favorites)
@@ -268,7 +272,15 @@ fn build_menu_content(
     right_pane.append(&fav_scroll);
 
     // Now populate app list (needs fav_flow reference for context menus)
-    populate_app_list(app, &app_list, &entries, mode, config, &fav_flow, &color_cache);
+    populate_app_list(
+        app,
+        &app_list,
+        &entries,
+        mode,
+        config,
+        &fav_flow,
+        &color_cache,
+    );
     let hint = Label::new(Some("Right-click app to add/remove from favorites."));
     hint.add_css_class("menu-hint");
     hint.set_halign(gtk4::Align::Start);
@@ -277,9 +289,15 @@ fn build_menu_content(
     // ── Vertical separator between panes ──
     let vsep = gtk4::Separator::new(Orientation::Vertical);
 
-    split.append(&left_pane);
-    split.append(&vsep);
-    split.append(&right_pane);
+    if layout.launcher.favorites_side == "left" {
+        split.append(&right_pane);
+        split.append(&vsep);
+        split.append(&left_pane);
+    } else {
+        split.append(&left_pane);
+        split.append(&vsep);
+        split.append(&right_pane);
+    }
     root.append(&split);
 
     // ── Wire interactions ──
@@ -297,7 +315,15 @@ fn build_menu_content(
             let idx = row.index();
             if idx == 0 {
                 // "All"
-                populate_app_list(&app_for_cat, &app_list_for_cat, &entries_for_cat, mode, &config_for_cat, &fav_flow_for_cat, &cache_for_cat);
+                populate_app_list(
+                    &app_for_cat,
+                    &app_list_for_cat,
+                    &entries_for_cat,
+                    mode,
+                    &config_for_cat,
+                    &fav_flow_for_cat,
+                    &cache_for_cat,
+                );
             } else {
                 let cat_keys: Vec<String> = categorized_for_cat.keys().cloned().collect();
                 if let Some(cat_name) = cat_keys.get((idx - 1) as usize) {
@@ -335,8 +361,22 @@ fn build_menu_content(
     search_entry.connect_changed(move |entry| {
         let query = entry.text().to_string().to_lowercase();
         if query.is_empty() {
-            populate_app_list(&app_for_search, &app_list_for_search, &entries_for_search, mode, &config_for_search, &fav_flow_for_search, &cache_for_search);
-            populate_favorites(&fav_flow_for_search2, &entries_for_fav_search, &config_for_search, mode, &cache_for_search);
+            populate_app_list(
+                &app_for_search,
+                &app_list_for_search,
+                &entries_for_search,
+                mode,
+                &config_for_search,
+                &fav_flow_for_search,
+                &cache_for_search,
+            );
+            populate_favorites(
+                &fav_flow_for_search2,
+                &entries_for_fav_search,
+                &config_for_search,
+                mode,
+                &cache_for_search,
+            );
         } else {
             let filtered: Vec<AppEntry> = entries_for_search
                 .iter()
@@ -349,7 +389,15 @@ fn build_menu_content(
                 })
                 .cloned()
                 .collect();
-            populate_app_list(&app_for_search, &app_list_for_search, &Rc::new(filtered), mode, &config_for_search, &fav_flow_for_search, &cache_for_search);
+            populate_app_list(
+                &app_for_search,
+                &app_list_for_search,
+                &Rc::new(filtered),
+                mode,
+                &config_for_search,
+                &fav_flow_for_search,
+                &cache_for_search,
+            );
 
             // Filter favorites too
             let fav_names: Vec<String> = config_for_search.borrow().menu.favorites.clone();
@@ -366,8 +414,13 @@ fn build_menu_content(
                 .cloned()
                 .collect();
             populate_favorites_from_entries(
-                &fav_flow_for_search2, &fav_entries, &config_for_search, mode,
-                &fav_flow_for_search2, &entries_for_fav_rebuild, &cache_for_search,
+                &fav_flow_for_search2,
+                &fav_entries,
+                &config_for_search,
+                mode,
+                &fav_flow_for_search2,
+                &entries_for_fav_rebuild,
+                &cache_for_search,
             );
         }
     });
@@ -528,7 +581,13 @@ fn make_app_row(
         if let Err(e) = cfg.borrow().save() {
             log::error!("Failed to save favorites: {}", e);
         }
-        populate_favorites(&fav_flow_for_ctx, &entries_for_ctx, &cfg, mode, &cache_for_ctx);
+        populate_favorites(
+            &fav_flow_for_ctx,
+            &entries_for_ctx,
+            &cfg,
+            mode,
+            &cache_for_ctx,
+        );
         // Brief visual feedback
         if let Some(hbox_ref) = hbox_weak.upgrade() {
             hbox_ref.add_css_class("fav-toggled");
@@ -553,15 +612,28 @@ fn app_nerd_glyph(entry: &AppEntry) -> String {
         s if s.contains("firefox") => "\u{f269}",
         s if s.contains("chrome") || s.contains("chromium") => "\u{f268}",
         s if s.contains("brave") => "\u{f39f}",
-        s if s.contains("foot") || s.contains("kitty") || s.contains("alacritty")
-            || s.contains("terminal") || s.contains("wezterm") || s.contains("konsole") => "\u{f489}",
+        s if s.contains("foot")
+            || s.contains("kitty")
+            || s.contains("alacritty")
+            || s.contains("terminal")
+            || s.contains("wezterm")
+            || s.contains("konsole") =>
+        {
+            "\u{f489}"
+        }
         s if s.contains("code") || s.contains("vscode") => "\u{e70c}",
         s if s.contains("neovim") || s.contains("nvim") => "\u{e62b}",
         s if s.contains("vim") => "\u{e62b}",
         s if s.contains("emacs") => "\u{e632}",
         s if s.contains("sublime") => "\u{e7aa}",
-        s if s.contains("thunar") || s.contains("nautilus") || s.contains("dolphin")
-            || s.contains("files") || s.contains("pcmanfm") => "\u{f413}",
+        s if s.contains("thunar")
+            || s.contains("nautilus")
+            || s.contains("dolphin")
+            || s.contains("files")
+            || s.contains("pcmanfm") =>
+        {
+            "\u{f413}"
+        }
         s if s.contains("spotify") => "\u{f1bc}",
         s if s.contains("vlc") => "\u{f40a}",
         s if s.contains("mpv") => "\u{f40a}",
@@ -717,7 +789,13 @@ fn make_favorite_tile(
         if let Err(e) = cfg.borrow().save() {
             log::error!("Failed to save favorites: {}", e);
         }
-        populate_favorites(&fav_flow_for_ctx, &entries_for_ctx, &cfg, mode, &cache_for_ctx);
+        populate_favorites(
+            &fav_flow_for_ctx,
+            &entries_for_ctx,
+            &cfg,
+            mode,
+            &cache_for_ctx,
+        );
     });
     tile.add_controller(right_click);
 
@@ -737,10 +815,9 @@ fn apply_icon_color(label: &Label, icon_name: &str, cache: &ColorCache) {
         );
         let provider = CssProvider::new();
         provider.load_from_data(&format!("* {{ {} }}", css));
-        label.style_context().add_provider(
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_USER + 2,
-        );
+        label
+            .style_context()
+            .add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_USER + 2);
     }
 }
 
@@ -760,13 +837,7 @@ fn extract_icon_color(icon_name: &str) -> Option<(f64, f64, f64)> {
     let file = paintable.file()?;
     let path = file.path()?;
 
-    let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(
-        &path,
-        16,
-        16,
-        true,
-    )
-    .ok()?;
+    let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(&path, 16, 16, true).ok()?;
 
     let pixels = pixbuf.pixel_bytes()?;
     let data = pixels.as_ref();

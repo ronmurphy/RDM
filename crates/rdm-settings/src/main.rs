@@ -1,10 +1,12 @@
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider,
-    DropDown, Entry, Label, Orientation, Switch, StringList,
+    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DropDown, Entry, Label,
+    Orientation, StringList, Switch, TextView,
 };
 use rdm_common::config::RdmConfig;
-use rdm_common::theme::{ThemeColor, list_theme_slugs, load_theme_colors, save_user_theme};
+use rdm_common::theme::{
+    load_theme_colors, load_theme_layout_for, save_user_theme, ThemeColor, ThemeLayout, ThemeMeta,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -84,6 +86,8 @@ fn main() {
 
 fn build_ui(app: &Application) {
     let config = Rc::new(RefCell::new(RdmConfig::load()));
+    let themes_state: Rc<RefCell<Vec<ThemeMeta>>> =
+        Rc::new(RefCell::new(rdm_common::theme::list_themes()));
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -101,7 +105,8 @@ fn build_ui(app: &Application) {
     sidebar.set_size_request(140, -1);
 
     // --- Appearance page ---
-    let appearance_page = build_appearance_page(&config);
+    let (appearance_page, refresh_appearance_themes) =
+        build_appearance_page(&config, &themes_state);
     stack.add_titled(&appearance_page, Some("appearance"), "Appearance");
 
     // --- Panel page ---
@@ -116,8 +121,13 @@ fn build_ui(app: &Application) {
     let displays_page = build_displays_page(&config);
     stack.add_titled(&displays_page, Some("displays"), "Displays");
 
+    // --- Diagnostics page ---
+    let diagnostics_page = build_diagnostics_page();
+    stack.add_titled(&diagnostics_page, Some("diagnostics"), "Diagnostics");
+
     // --- Theme Editor page ---
-    let theme_editor_page = build_theme_editor_page(&window);
+    let theme_editor_page =
+        build_theme_editor_page(&window, themes_state.clone(), refresh_appearance_themes);
     stack.add_titled(&theme_editor_page, Some("theme-editor"), "Theme Editor");
 
     // --- Main layout ---
@@ -182,7 +192,10 @@ fn build_ui(app: &Application) {
 
 // ─── Appearance Settings ─────────────────────────────────────────
 
-fn build_appearance_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
+fn build_appearance_page(
+    config: &Rc<RefCell<RdmConfig>>,
+    themes_state: &Rc<RefCell<Vec<ThemeMeta>>>,
+) -> (GtkBox, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 16);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
@@ -196,7 +209,7 @@ fn build_appearance_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
 
     // Theme selector
     let theme_row = setting_row("Theme");
-    let themes = rdm_common::theme::list_themes();
+    let themes = themes_state.borrow().clone();
     let theme_names: Vec<String> = themes.iter().map(|t| t.display_name.clone()).collect();
     let theme_str_refs: Vec<&str> = theme_names.iter().map(|s| s.as_str()).collect();
     let theme_list = StringList::new(&theme_str_refs);
@@ -204,16 +217,13 @@ fn build_appearance_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
 
     // Set current selection
     let current = config.borrow().appearance.theme.clone();
-    let selected_idx = themes
-        .iter()
-        .position(|t| t.name == current)
-        .unwrap_or(0) as u32;
+    let selected_idx = themes.iter().position(|t| t.name == current).unwrap_or(0) as u32;
     theme_dropdown.set_selected(selected_idx);
 
     let cfg = config.clone();
-    let themes_for_handler = themes.clone();
+    let themes_for_handler = themes_state.clone();
     theme_dropdown.connect_selected_notify(move |dd| {
-        if let Some(theme) = themes_for_handler.get(dd.selected() as usize) {
+        if let Some(theme) = themes_for_handler.borrow().get(dd.selected() as usize) {
             cfg.borrow_mut().appearance.theme = theme.name.clone();
         }
     });
@@ -221,14 +231,23 @@ fn build_appearance_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     page.append(&theme_row);
 
     // Description of selected theme
+    let desc = Label::new(None);
+    desc.add_css_class("settings-hint");
+    desc.set_halign(gtk4::Align::Start);
     if let Some(theme) = themes.get(selected_idx as usize) {
-        if !theme.description.is_empty() {
-            let desc = Label::new(Some(&theme.description));
-            desc.add_css_class("settings-hint");
-            desc.set_halign(gtk4::Align::Start);
-            page.append(&desc);
-        }
+        desc.set_text(&theme.description);
     }
+    page.append(&desc);
+
+    let desc_for_handler = desc.clone();
+    let themes_for_desc = themes_state.clone();
+    theme_dropdown.connect_selected_notify(move |dd| {
+        if let Some(theme) = themes_for_desc.borrow().get(dd.selected() as usize) {
+            desc_for_handler.set_text(&theme.description);
+        } else {
+            desc_for_handler.set_text("");
+        }
+    });
 
     let hint = Label::new(Some(
         "Theme changes apply after clicking Apply. All RDM components will restart.",
@@ -238,14 +257,38 @@ fn build_appearance_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     hint.set_margin_top(12);
     page.append(&hint);
 
-    let user_hint = Label::new(Some(
-        "Custom themes can be added to ~/.config/rdm/themes/",
-    ));
+    let user_hint = Label::new(Some("Custom themes can be added to ~/.config/rdm/themes/"));
     user_hint.add_css_class("settings-hint");
     user_hint.set_halign(gtk4::Align::Start);
     page.append(&user_hint);
 
-    page
+    let dropdown_for_refresh = theme_dropdown.clone();
+    let desc_for_refresh = desc.clone();
+    let cfg_for_refresh = config.clone();
+    let themes_for_refresh = themes_state.clone();
+    let refresh = Rc::new(move || {
+        let current_theme = cfg_for_refresh.borrow().appearance.theme.clone();
+        let new_themes = rdm_common::theme::list_themes();
+        *themes_for_refresh.borrow_mut() = new_themes.clone();
+
+        let names: Vec<String> = new_themes.iter().map(|t| t.display_name.clone()).collect();
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let list = StringList::new(&refs);
+        dropdown_for_refresh.set_model(Some(&list));
+
+        let selected = new_themes
+            .iter()
+            .position(|t| t.name == current_theme)
+            .unwrap_or(0) as u32;
+        dropdown_for_refresh.set_selected(selected);
+        if let Some(theme) = new_themes.get(selected as usize) {
+            desc_for_refresh.set_text(&theme.description);
+        } else {
+            desc_for_refresh.set_text("");
+        }
+    });
+
+    (page, refresh)
 }
 
 // ─── Panel Settings ──────────────────────────────────────────────
@@ -290,7 +333,11 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     let pos_row = setting_row("Panel Position");
     let pos_modes = StringList::new(&["top", "bottom"]);
     let pos_dropdown = DropDown::new(Some(pos_modes), gtk4::Expression::NONE);
-    pos_dropdown.set_selected(if config.borrow().panel.position == "bottom" { 1 } else { 0 });
+    pos_dropdown.set_selected(if config.borrow().panel.position == "bottom" {
+        1
+    } else {
+        0
+    });
     let cfg = config.clone();
     pos_dropdown.connect_selected_notify(move |dd| {
         let pos = if dd.selected() == 1 { "bottom" } else { "top" };
@@ -303,7 +350,11 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     let height_row = setting_row("Panel Height");
     let height_adj = gtk4::Adjustment::new(
         config.borrow().panel.height as f64,
-        24.0, 64.0, 1.0, 4.0, 0.0,
+        24.0,
+        64.0,
+        1.0,
+        4.0,
+        0.0,
     );
     let height_spin = gtk4::SpinButton::new(Some(&height_adj), 1.0, 0);
     let cfg = config.clone();
@@ -490,7 +541,9 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
     page.append(&color_row);
 
     // Preview hint
-    let hint = Label::new(Some("Changes apply after clicking Apply. Panel will hot-reload."));
+    let hint = Label::new(Some(
+        "Changes apply after clicking Apply. Panel will hot-reload.",
+    ));
     hint.add_css_class("settings-hint");
     hint.set_halign(gtk4::Align::Start);
     hint.set_margin_top(12);
@@ -501,7 +554,11 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
 
 // ─── Theme Editor ────────────────────────────────────────────────
 
-fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
+fn build_theme_editor_page(
+    window: &ApplicationWindow,
+    themes_state: Rc<RefCell<Vec<ThemeMeta>>>,
+    refresh_appearance_themes: Rc<dyn Fn()>,
+) -> GtkBox {
     let page = GtkBox::new(Orientation::Vertical, 12);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
@@ -522,8 +579,17 @@ fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
 
     // ── Base theme selector ──────────────────────────────────
     let base_row = setting_row("Base Theme");
-    let slugs = list_theme_slugs();
-    let display_names: Vec<String> = slugs.iter().map(|(_, d)| d.clone()).collect();
+    let slugs: Vec<(String, String)> = themes_state
+        .borrow()
+        .iter()
+        .map(|t| (t.name.clone(), t.display_name.clone()))
+        .collect();
+    let slugs_state: Rc<RefCell<Vec<(String, String)>>> = Rc::new(RefCell::new(slugs));
+    let display_names: Vec<String> = slugs_state
+        .borrow()
+        .iter()
+        .map(|(_, d)| d.clone())
+        .collect();
     let str_refs: Vec<&str> = display_names.iter().map(|s| s.as_str()).collect();
     let slug_list = StringList::new(&str_refs);
     let base_dropdown = DropDown::new(Some(slug_list), gtk4::Expression::NONE);
@@ -537,6 +603,134 @@ fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
     name_entry.set_hexpand(true);
     name_row.append(&name_entry);
     page.append(&name_row);
+
+    // ── Layout profile controls ──────────────────────────────
+    let theme_layout: Rc<RefCell<ThemeLayout>> = Rc::new(RefCell::new(ThemeLayout::default()));
+
+    let layout_header = Label::new(Some("Layout Profile"));
+    layout_header.add_css_class("settings-header");
+    layout_header.set_halign(gtk4::Align::Start);
+    layout_header.set_margin_top(6);
+    page.append(&layout_header);
+
+    let panel_launcher_row = setting_row("Panel: Launcher");
+    let panel_launcher_dd = DropDown::new(
+        Some(StringList::new(&["left", "center", "right"])),
+        gtk4::Expression::NONE,
+    );
+    panel_launcher_dd.set_selected(0);
+    {
+        let layout = theme_layout.clone();
+        panel_launcher_dd.connect_selected_notify(move |dd| {
+            let v = match dd.selected() {
+                1 => "center",
+                2 => "right",
+                _ => "left",
+            };
+            layout.borrow_mut().panel.launcher = v.to_string();
+        });
+    }
+    panel_launcher_row.append(&panel_launcher_dd);
+    page.append(&panel_launcher_row);
+
+    let panel_taskbar_row = setting_row("Panel: Taskbar");
+    let panel_taskbar_dd = DropDown::new(
+        Some(StringList::new(&["left", "center", "right"])),
+        gtk4::Expression::NONE,
+    );
+    panel_taskbar_dd.set_selected(1);
+    {
+        let layout = theme_layout.clone();
+        panel_taskbar_dd.connect_selected_notify(move |dd| {
+            let v = match dd.selected() {
+                1 => "center",
+                2 => "right",
+                _ => "left",
+            };
+            layout.borrow_mut().panel.taskbar = v.to_string();
+        });
+    }
+    panel_taskbar_row.append(&panel_taskbar_dd);
+    page.append(&panel_taskbar_row);
+
+    let panel_clock_row = setting_row("Panel: Clock");
+    let panel_clock_dd = DropDown::new(
+        Some(StringList::new(&["left", "center", "right"])),
+        gtk4::Expression::NONE,
+    );
+    panel_clock_dd.set_selected(2);
+    {
+        let layout = theme_layout.clone();
+        panel_clock_dd.connect_selected_notify(move |dd| {
+            let v = match dd.selected() {
+                1 => "center",
+                2 => "right",
+                _ => "left",
+            };
+            layout.borrow_mut().panel.clock = v.to_string();
+        });
+    }
+    panel_clock_row.append(&panel_clock_dd);
+    page.append(&panel_clock_row);
+
+    let panel_tray_row = setting_row("Panel: Tray");
+    let panel_tray_dd = DropDown::new(
+        Some(StringList::new(&["left", "center", "right"])),
+        gtk4::Expression::NONE,
+    );
+    panel_tray_dd.set_selected(2);
+    {
+        let layout = theme_layout.clone();
+        panel_tray_dd.connect_selected_notify(move |dd| {
+            let v = match dd.selected() {
+                1 => "center",
+                2 => "right",
+                _ => "left",
+            };
+            layout.borrow_mut().panel.tray = v.to_string();
+        });
+    }
+    panel_tray_row.append(&panel_tray_dd);
+    page.append(&panel_tray_row);
+
+    let launcher_fav_row = setting_row("Launcher: Favorites Side");
+    let launcher_fav_dd = DropDown::new(
+        Some(StringList::new(&["left", "right"])),
+        gtk4::Expression::NONE,
+    );
+    launcher_fav_dd.set_selected(1);
+    {
+        let layout = theme_layout.clone();
+        launcher_fav_dd.connect_selected_notify(move |dd| {
+            let v = if dd.selected() == 0 { "left" } else { "right" };
+            layout.borrow_mut().launcher.favorites_side = v.to_string();
+        });
+    }
+    launcher_fav_row.append(&launcher_fav_dd);
+    page.append(&launcher_fav_row);
+
+    let launcher_settings_row = setting_row("Launcher: Settings Side");
+    let launcher_settings_dd = DropDown::new(
+        Some(StringList::new(&["left", "right"])),
+        gtk4::Expression::NONE,
+    );
+    launcher_settings_dd.set_selected(0);
+    {
+        let layout = theme_layout.clone();
+        launcher_settings_dd.connect_selected_notify(move |dd| {
+            let v = if dd.selected() == 0 { "left" } else { "right" };
+            layout.borrow_mut().launcher.settings_side = v.to_string();
+        });
+    }
+    launcher_settings_row.append(&launcher_settings_dd);
+    page.append(&launcher_settings_row);
+
+    let layout_hint = Label::new(Some(
+        "These layout settings are saved with the theme and loaded at startup.",
+    ));
+    layout_hint.add_css_class("settings-hint");
+    layout_hint.set_halign(gtk4::Align::Start);
+    page.append(&layout_hint);
 
     // ── Scrollable color swatch grid ─────────────────────────
     let scroll = gtk4::ScrolledWindow::new();
@@ -561,15 +755,57 @@ fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
     let colors_for_load = colors.clone();
     let grid_for_load = grid.clone();
     let name_for_load = name_entry.clone();
-    let slugs_for_load = slugs.clone();
+    let slugs_for_load = slugs_state.clone();
     let window_for_load = window.clone();
+    let layout_for_load = theme_layout.clone();
+    let panel_launcher_dd_for_load = panel_launcher_dd.clone();
+    let panel_taskbar_dd_for_load = panel_taskbar_dd.clone();
+    let panel_clock_dd_for_load = panel_clock_dd.clone();
+    let panel_tray_dd_for_load = panel_tray_dd.clone();
+    let launcher_fav_dd_for_load = launcher_fav_dd.clone();
+    let launcher_settings_dd_for_load = launcher_settings_dd.clone();
 
     // Loads the selected theme's colors into the grid
     let populate_grid = Rc::new(move |idx: u32| {
-        let Some((slug, _display)) = slugs_for_load.get(idx as usize) else {
+        let slugs = slugs_for_load.borrow();
+        let Some((slug, _display)) = slugs.get(idx as usize) else {
             return;
         };
         let loaded = load_theme_colors(slug);
+        let loaded_layout = load_theme_layout_for(slug);
+        *layout_for_load.borrow_mut() = loaded_layout.clone();
+        panel_launcher_dd_for_load.set_selected(match loaded_layout.panel.launcher.as_str() {
+            "center" => 1,
+            "right" => 2,
+            _ => 0,
+        });
+        panel_taskbar_dd_for_load.set_selected(match loaded_layout.panel.taskbar.as_str() {
+            "left" => 0,
+            "right" => 2,
+            _ => 1,
+        });
+        panel_clock_dd_for_load.set_selected(match loaded_layout.panel.clock.as_str() {
+            "left" => 0,
+            "center" => 1,
+            _ => 2,
+        });
+        panel_tray_dd_for_load.set_selected(match loaded_layout.panel.tray.as_str() {
+            "left" => 0,
+            "center" => 1,
+            _ => 2,
+        });
+        launcher_fav_dd_for_load.set_selected(if loaded_layout.launcher.favorites_side == "left" {
+            0
+        } else {
+            1
+        });
+        launcher_settings_dd_for_load.set_selected(
+            if loaded_layout.launcher.settings_side == "right" {
+                1
+            } else {
+                0
+            },
+        );
         // Default the new-theme name to "<base>-custom"
         if name_for_load.text().is_empty() {
             name_for_load.set_text(&format!("{}-custom", slug));
@@ -662,7 +898,12 @@ fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
     status_label.set_hexpand(true);
 
     let colors_for_save = colors.clone();
+    let layout_for_save = theme_layout.clone();
     let name_for_save = name_entry.clone();
+    let refresh_after_save = refresh_appearance_themes.clone();
+    let themes_for_save = themes_state.clone();
+    let slugs_for_save = slugs_state.clone();
+    let base_dropdown_for_save = base_dropdown.clone();
     let status = status_label.clone();
     save_btn.connect_clicked(move |_| {
         let raw_name = name_for_save.text().to_string();
@@ -677,8 +918,26 @@ fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
         }
         let display_name = raw_name.trim().to_string();
         let current_colors = colors_for_save.borrow().clone();
-        match save_user_theme(&slug, &display_name, &current_colors) {
+        let current_layout = layout_for_save.borrow().clone();
+        match save_user_theme(&slug, &display_name, &current_colors, Some(&current_layout)) {
             Ok(()) => {
+                refresh_after_save();
+                // Refresh this page's base-theme dropdown immediately too.
+                let latest_slugs: Vec<(String, String)> = themes_for_save
+                    .borrow()
+                    .iter()
+                    .map(|t| (t.name.clone(), t.display_name.clone()))
+                    .collect();
+                *slugs_for_save.borrow_mut() = latest_slugs.clone();
+                let names: Vec<String> = latest_slugs.iter().map(|(_, d)| d.clone()).collect();
+                let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+                let model = StringList::new(&refs);
+                base_dropdown_for_save.set_model(Some(&model));
+                let selected = latest_slugs
+                    .iter()
+                    .position(|(name, _)| name == &slug)
+                    .unwrap_or(0);
+                base_dropdown_for_save.set_selected(selected as u32);
                 status.set_text(&format!("Saved to ~/.config/rdm/themes/{}/", slug));
                 status.remove_css_class("error");
                 status.add_css_class("settings-hint");
@@ -699,6 +958,140 @@ fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
     page
 }
 
+fn build_diagnostics_page() -> GtkBox {
+    let page = GtkBox::new(Orientation::Vertical, 12);
+    page.set_margin_top(20);
+    page.set_margin_bottom(20);
+    page.set_margin_start(20);
+    page.set_margin_end(20);
+
+    let header = Label::new(Some("Diagnostics"));
+    header.add_css_class("settings-header");
+    header.set_halign(gtk4::Align::Start);
+    page.append(&header);
+
+    let hint = Label::new(Some(
+        "Check dependency health and view session logs. Use Refresh to reload.",
+    ));
+    hint.add_css_class("settings-hint");
+    hint.set_halign(gtk4::Align::Start);
+    page.append(&hint);
+
+    let deps = [
+        "labwc",
+        "swaybg",
+        "nmcli",
+        "wpctl",
+        "playerctl",
+        "wlr-randr",
+        "grim",
+        "slurp",
+        "wl-copy",
+    ];
+
+    let deps_box = GtkBox::new(Orientation::Vertical, 6);
+    let mut dep_rows: Vec<(String, Label)> = Vec::new();
+    for dep in deps {
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        let name = Label::new(Some(dep));
+        name.set_width_chars(12);
+        name.set_xalign(0.0);
+        let status = Label::new(None);
+        status.set_xalign(0.0);
+        row.append(&name);
+        row.append(&status);
+        deps_box.append(&row);
+        dep_rows.push((dep.to_string(), status));
+    }
+    page.append(&deps_box);
+
+    let log_header = Label::new(Some("Session Log"));
+    log_header.add_css_class("settings-header");
+    log_header.set_halign(gtk4::Align::Start);
+    log_header.set_margin_top(8);
+    page.append(&log_header);
+
+    let log_path = rdm_common::config::config_dir().join("rdm.log");
+    let log_path_label = Label::new(Some(&format!("Path: {}", log_path.display())));
+    log_path_label.add_css_class("settings-hint");
+    log_path_label.set_halign(gtk4::Align::Start);
+    page.append(&log_path_label);
+
+    let log_scroll = gtk4::ScrolledWindow::new();
+    log_scroll.set_vexpand(true);
+    log_scroll.set_hexpand(true);
+    log_scroll.set_min_content_height(220);
+    let log_view = TextView::new();
+    log_view.set_editable(false);
+    log_view.set_cursor_visible(false);
+    log_view.set_monospace(true);
+    log_scroll.set_child(Some(&log_view));
+    page.append(&log_scroll);
+
+    let controls = GtkBox::new(Orientation::Horizontal, 8);
+    controls.set_halign(gtk4::Align::End);
+    let refresh_btn = Button::with_label("Refresh");
+    let clear_btn = Button::with_label("Clear Log");
+    controls.append(&clear_btn);
+    controls.append(&refresh_btn);
+    page.append(&controls);
+
+    let refresh_state = Rc::new(dep_rows);
+    let view_for_refresh = log_view.clone();
+    let path_for_refresh = log_path.clone();
+    let refresh_all = Rc::new(move || {
+        for (name, label) in refresh_state.iter() {
+            if command_exists(name) {
+                label.set_text("OK");
+                label.remove_css_class("error");
+            } else {
+                label.set_text("Missing");
+                label.add_css_class("error");
+            }
+        }
+        let text = tail_log_file(&path_for_refresh, 300);
+        view_for_refresh.buffer().set_text(&text);
+    });
+
+    {
+        let refresh_all_btn = refresh_all.clone();
+        refresh_btn.connect_clicked(move |_| refresh_all_btn());
+    }
+
+    {
+        let refresh_after_clear = refresh_all.clone();
+        let path_for_clear = log_path.clone();
+        clear_btn.connect_clicked(move |_| {
+            if let Err(e) = std::fs::write(&path_for_clear, "") {
+                log::error!("Failed to clear log {}: {}", path_for_clear.display(), e);
+            }
+            refresh_after_clear();
+        });
+    }
+
+    refresh_all();
+    page
+}
+
+fn command_exists(name: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {} >/dev/null 2>&1", name))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn tail_log_file(path: &std::path::Path, max_lines: usize) -> String {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => return format!("Log unavailable: {}", e),
+    };
+    let lines: Vec<&str> = contents.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
+}
+
 /// Apply a hex color as inline CSS to a swatch button.
 #[allow(deprecated)]
 fn apply_swatch_color(btn: &Button, hex: &str) {
@@ -708,7 +1101,8 @@ fn apply_swatch_color(btn: &Button, hex: &str) {
     );
     let provider = CssProvider::new();
     provider.load_from_data(&css);
-    btn.style_context().add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_USER + 2);
+    btn.style_context()
+        .add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_USER + 2);
 }
 
 /// Open a GTK4 ColorDialog, update the swatch and color vec on success.
@@ -771,10 +1165,7 @@ fn setting_row(label_text: &str) -> GtkBox {
 
 // ─── Display Arrangement Drawing ─────────────────────────────────
 
-fn parse_mode_dimensions(
-    mode_str: &str,
-    info: &rdm_common::display::DisplayInfo,
-) -> (u32, u32) {
+fn parse_mode_dimensions(mode_str: &str, info: &rdm_common::display::DisplayInfo) -> (u32, u32) {
     // Try parsing from config mode string "WIDTHxHEIGHT@RATE"
     if !mode_str.is_empty() {
         let res_part = mode_str.split('@').next().unwrap_or("");
@@ -1122,14 +1513,8 @@ fn build_displays_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         Rc::new(RefCell::new(Vec::new()));
 
     for (i, info) in displays.iter().enumerate() {
-        let (x_spin, y_spin) = build_display_section(
-            &inner,
-            config,
-            info,
-            i,
-            &arrangement,
-            &drawing_area,
-        );
+        let (x_spin, y_spin) =
+            build_display_section(&inner, config, info, i, &arrangement, &drawing_area);
         spin_pairs.borrow_mut().push((x_spin, y_spin));
     }
 
@@ -1184,8 +1569,7 @@ fn build_displays_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         }
 
         // Update config
-        cfg_update.borrow_mut().displays[drag_idx].position =
-            format!("{},{}", new_x, new_y);
+        cfg_update.borrow_mut().displays[drag_idx].position = format!("{},{}", new_x, new_y);
 
         // Update spinbuttons
         {
@@ -1227,8 +1611,7 @@ fn build_displays_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         let snapped_y = arr_end.borrow().rects[drag_idx].y;
 
         // Update config with snapped position
-        cfg_end.borrow_mut().displays[drag_idx].position =
-            format!("{},{}", snapped_x, snapped_y);
+        cfg_end.borrow_mut().displays[drag_idx].position = format!("{},{}", snapped_x, snapped_y);
 
         // Update spinbuttons
         {
@@ -1353,11 +1736,7 @@ fn build_display_section(
     let rate_dropdown = DropDown::new(Some(rate_list), gtk4::Expression::NONE);
 
     // Find current rate
-    let current_rate_str = current_mode
-        .split('@')
-        .nth(1)
-        .unwrap_or("")
-        .to_string();
+    let current_rate_str = current_mode.split('@').nth(1).unwrap_or("").to_string();
     let rate_idx = rates
         .iter()
         .position(|r| format!("{:.0}", r) == current_rate_str)
@@ -1393,8 +1772,7 @@ fn build_display_section(
 
             // Update config with the first available rate
             let rate = new_rates.first().copied().unwrap_or(60.0);
-            cfg.borrow_mut().displays[index].mode =
-                format!("{}x{}@{:.0}", w, h, rate);
+            cfg.borrow_mut().displays[index].mode = format!("{}x{}@{:.0}", w, h, rate);
 
             // Update arrangement rect dimensions
             arr.borrow_mut().rects[index].width = w;
@@ -1418,8 +1796,7 @@ fn build_display_section(
                 .collect();
             let rate_sel = dd.selected() as usize;
             if let Some(&rate) = rates.get(rate_sel) {
-                cfg.borrow_mut().displays[index].mode =
-                    format!("{}x{}@{:.0}", w, h, rate);
+                cfg.borrow_mut().displays[index].mode = format!("{}x{}@{:.0}", w, h, rate);
             }
         }
     });

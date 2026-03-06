@@ -1116,6 +1116,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdm-noterm"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "env_logger",
+ "gtk4",
+ "log",
+ "rdm-common",
+]
+
+[[package]]
 name = "rdm-notify"
 version = "0.1.0"
 dependencies = [

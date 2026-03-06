@@ -3,8 +3,13 @@ use std::path::PathBuf;
 
 use crate::display::DisplayConfig;
 
+pub const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RdmConfig {
+    /// Schema version for rdm.toml migration/compat checks.
+    #[serde(default = "default_legacy_config_schema_version", alias = "version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub panel: PanelConfig,
     #[serde(default)]
@@ -68,19 +73,54 @@ pub struct AppearanceConfig {
     pub theme: String,
 }
 
-fn default_panel_height() -> i32 { 32 }
-fn default_position() -> String { "top".into() }
-fn default_true() -> bool { true }
-fn default_clock_format() -> String { "%H:%M  %b %d".into() }
-fn default_launcher_width() -> i32 { 500 }
-fn default_launcher_height() -> i32 { 400 }
-fn default_snap_threshold() -> i32 { 20 }
-fn default_taskbar_mode() -> String { "icons".into() }
-fn default_wallpaper_path() -> String { String::new() }
-fn default_wallpaper_mode() -> String { "fill".into() }
-fn default_wallpaper_color() -> String { "#1a1b26".into() }
-fn default_launcher_position() -> String { "center".into() }
-fn default_theme() -> String { "tokyo-night".into() }
+fn default_legacy_config_schema_version() -> u32 {
+    // Missing field means pre-versioned config.
+    0
+}
+
+fn default_config_schema_version() -> u32 {
+    CURRENT_CONFIG_SCHEMA_VERSION
+}
+
+fn default_panel_height() -> i32 {
+    32
+}
+fn default_position() -> String {
+    "top".into()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_clock_format() -> String {
+    "%H:%M  %b %d".into()
+}
+fn default_launcher_width() -> i32 {
+    500
+}
+fn default_launcher_height() -> i32 {
+    400
+}
+fn default_snap_threshold() -> i32 {
+    20
+}
+fn default_taskbar_mode() -> String {
+    "icons".into()
+}
+fn default_wallpaper_path() -> String {
+    String::new()
+}
+fn default_wallpaper_mode() -> String {
+    "fill".into()
+}
+fn default_wallpaper_color() -> String {
+    "#1a1b26".into()
+}
+fn default_launcher_position() -> String {
+    "center".into()
+}
+fn default_theme() -> String {
+    "tokyo-night".into()
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WallpaperConfig {
@@ -155,6 +195,7 @@ impl Default for AppearanceConfig {
 impl Default for RdmConfig {
     fn default() -> Self {
         Self {
+            schema_version: default_config_schema_version(),
             panel: PanelConfig::default(),
             launcher: LauncherConfig::default(),
             snap: SnapConfig::default(),
@@ -170,7 +211,21 @@ impl RdmConfig {
     pub fn load() -> Self {
         let path = config_path();
         match std::fs::read_to_string(&path) {
-            Ok(contents) => toml::from_str(&contents).unwrap_or_default(),
+            Ok(contents) => {
+                let mut cfg: Self = toml::from_str(&contents).unwrap_or_default();
+
+                if cfg.schema_version > CURRENT_CONFIG_SCHEMA_VERSION {
+                    log::warn!(
+                        "Config schema version {} is newer than supported {}; loading with best effort",
+                        cfg.schema_version,
+                        CURRENT_CONFIG_SCHEMA_VERSION
+                    );
+                } else if cfg.schema_version < CURRENT_CONFIG_SCHEMA_VERSION {
+                    cfg = migrate_config(cfg);
+                }
+
+                cfg
+            }
             Err(_) => Self::default(),
         }
     }
@@ -192,4 +247,73 @@ pub fn config_dir() -> PathBuf {
 
 pub fn config_path() -> PathBuf {
     config_dir().join("rdm.toml")
+}
+
+fn migrate_config(mut cfg: RdmConfig) -> RdmConfig {
+    let start = cfg.schema_version;
+    while cfg.schema_version < CURRENT_CONFIG_SCHEMA_VERSION {
+        cfg = match cfg.schema_version {
+            0 => migrate_config_v0_to_v1(cfg),
+            v => {
+                log::warn!(
+                    "No migration step defined for config schema {}; forcing {}",
+                    v,
+                    CURRENT_CONFIG_SCHEMA_VERSION
+                );
+                let mut forced = cfg;
+                forced.schema_version = CURRENT_CONFIG_SCHEMA_VERSION;
+                forced
+            }
+        };
+    }
+
+    log::info!(
+        "Upgraded config schema from {} to {}",
+        start,
+        cfg.schema_version
+    );
+    cfg
+}
+
+fn migrate_config_v0_to_v1(mut cfg: RdmConfig) -> RdmConfig {
+    // v1 introduces explicit schema_version while preserving legacy semantics.
+    cfg.schema_version = 1;
+    cfg
+}
+
+#[allow(dead_code)]
+fn migrate_config_v1_to_v2(mut cfg: RdmConfig) -> RdmConfig {
+    // Reserved for future schema bump.
+    cfg.schema_version = 2;
+    cfg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_config_without_schema_migrates() {
+        let toml = r#"
+[appearance]
+theme = "tokyo-night"
+
+[panel]
+height = 40
+"#;
+        let cfg: RdmConfig = toml::from_str(toml).expect("parse legacy config");
+        assert_eq!(cfg.schema_version, 0);
+
+        let migrated = migrate_config(cfg);
+        assert_eq!(migrated.schema_version, CURRENT_CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.panel.height, 40);
+        assert_eq!(migrated.appearance.theme, "tokyo-night");
+    }
+
+    #[test]
+    fn config_roundtrip_includes_schema_version() {
+        let cfg = RdmConfig::default();
+        let encoded = toml::to_string_pretty(&cfg).expect("serialize config");
+        assert!(encoded.contains("schema_version = 1"));
+    }
 }

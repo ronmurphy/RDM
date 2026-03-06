@@ -1,0 +1,15 @@
+[package]
+name = "rdm-noterm"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rdm-noterm"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+rdm-common = { workspace = true }
+dirs = { workspace = true }

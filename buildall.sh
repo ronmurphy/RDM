@@ -20,6 +20,10 @@ err()   { echo -e "${RED}  ✗ $1${NC}"; exit 1; }
 
 cd "$SCRIPT_DIR"
 
+info "Running cargo check workspace gate..."
+cargo check --workspace
+ok "cargo check passed"
+
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════╗"
 echo "  ║     RDM Desktop — Build All          ║"
@@ -31,6 +35,7 @@ CRATES=(
     rdm-session
     rdm-panel
     rdm-launcher
+    rdm-noterm
     rdm-settings
     rdm-snap
     rdm-watermark

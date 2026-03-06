@@ -216,8 +216,10 @@ impl Dispatch<wl_seat::WlSeat, ()> for WaylandState {
 
 /// Start the Wayland toplevel tracking thread.
 /// Returns the shared state and an action sender for the GTK side.
-pub fn start_toplevel_tracker() -> (Arc<Mutex<SharedState>>, std::sync::mpsc::Sender<ToplevelAction>)
-{
+pub fn start_toplevel_tracker() -> (
+    Arc<Mutex<SharedState>>,
+    std::sync::mpsc::Sender<ToplevelAction>,
+) {
     let shared = Arc::new(Mutex::new(SharedState {
         toplevels: HashMap::new(),
         generation: 0,
@@ -285,16 +287,21 @@ fn run_wayland_loop(
     dbglog!("toplevel: connecting to wayland...");
     let conn = Connection::connect_to_env()?;
     dbglog!("toplevel: connected, initializing registry...");
-    let (globals, mut event_queue): (_, EventQueue<WaylandState>) =
-        registry_queue_init(&conn)?;
+    let (globals, mut event_queue): (_, EventQueue<WaylandState>) = registry_queue_init(&conn)?;
 
     let qh = event_queue.handle();
 
     dbglog!("toplevel: binding foreign toplevel manager...");
     // Bind the foreign toplevel manager
     let _manager = match globals.bind::<ZwlrForeignToplevelManagerV1, _, _>(&qh, 1..=3, ()) {
-        Ok(m) => { dbglog!("toplevel: bound OK"); m }
-        Err(e) => { dbglog!("toplevel: BIND FAILED: {}", e); return Err(e.into()); }
+        Ok(m) => {
+            dbglog!("toplevel: bound OK");
+            m
+        }
+        Err(e) => {
+            dbglog!("toplevel: BIND FAILED: {}", e);
+            return Err(e.into());
+        }
     };
 
     // Bind a seat for activate requests

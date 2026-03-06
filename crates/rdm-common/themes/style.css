@@ -98,7 +98,7 @@ modelbutton {
     padding: 6px 16px;
     color: @theme_fg;
     min-height: 0;
-    font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
+    font-family: "Inter", "Noto Sans", "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", sans-serif;
 }
 
 popover modelbutton:hover,
@@ -425,7 +425,8 @@ stacksidebar row:selected {
 
 /* ── Watermark ─────────────────────────────────────────────────── */
 .watermark {
-    color: rgba(255, 255, 255, 0.25);
+    color: @theme_subtle;
+    opacity: 0.45;
     font-family: "Inter", "Noto Sans Mono", monospace;
     font-size: 11px;
     padding: 4px 8px;

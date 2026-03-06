@@ -1,0 +1,1109 @@
+use gtk4::prelude::*;
+use gtk4::{
+    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea, DropDown,
+    Entry, Label, Orientation, Paned, Revealer, RevealerTransitionType, ScrolledWindow, StringList,
+    Switch, TextView,
+};
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::rc::Rc;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RenderMode {
+    Raw,
+    Text,
+    Icons,
+    Nerd,
+}
+
+impl RenderMode {
+    fn from_selected(idx: u32) -> Self {
+        match idx {
+            1 => Self::Text,
+            2 => Self::Icons,
+            3 => Self::Nerd,
+            _ => Self::Raw,
+        }
+    }
+
+    fn selected_index(self) -> u32 {
+        match self {
+            Self::Raw => 0,
+            Self::Text => 1,
+            Self::Icons => 2,
+            Self::Nerd => 3,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::Text => "text",
+            Self::Icons => "icons",
+            Self::Nerd => "nerd",
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s.trim() {
+            "text" => Self::Text,
+            "icons" => Self::Icons,
+            "nerd" => Self::Nerd,
+            _ => Self::Raw,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum EntryKind {
+    Directory,
+    File,
+    Symlink,
+    Other,
+}
+
+#[derive(Clone)]
+struct LsEntry {
+    name: String,
+    path: PathBuf,
+    kind: EntryKind,
+    perms: String,
+    size: String,
+    modified: String,
+}
+
+struct UiState {
+    cwd: PathBuf,
+    mode: RenderMode,
+    show_hidden: bool,
+    search_query: String,
+    output_box: GtkBox,
+    cwd_label: Label,
+    breadcrumb_box: GtkBox,
+    preview_label: Label,
+    preview_text: TextView,
+    preview_image: DrawingArea,
+    preview_image_buf: Rc<RefCell<Option<gtk4::gdk_pixbuf::Pixbuf>>>,
+    preview_stack: gtk4::Stack,
+    preview_revealer: Revealer,
+    paned: Paned,
+    open_system_btn: Button,
+    selected_path: Option<PathBuf>,
+}
+
+fn main() {
+    env_logger::init();
+    let app = Application::builder()
+        .application_id("org.rdm.noterm")
+        .build();
+    app.connect_activate(build_ui);
+    app.run();
+}
+
+fn build_ui(app: &Application) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    let initial_mode = load_saved_mode();
+
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title("RDM NoTerm")
+        .default_width(1100)
+        .default_height(700)
+        .build();
+
+    let root = GtkBox::new(Orientation::Vertical, 8);
+    root.set_margin_top(10);
+    root.set_margin_bottom(10);
+    root.set_margin_start(10);
+    root.set_margin_end(10);
+
+    let top = GtkBox::new(Orientation::Horizontal, 8);
+    let cwd_title = Label::new(Some("CWD:"));
+    cwd_title.set_xalign(0.0);
+    let cwd_label = Label::new(Some(&cwd.display().to_string()));
+    cwd_label.set_hexpand(true);
+    cwd_label.set_xalign(0.0);
+    let mode_label = Label::new(Some("Mode"));
+    let mode_dd = DropDown::new(
+        Some(StringList::new(&["raw", "text", "icons", "nerd"])),
+        gtk4::Expression::NONE,
+    );
+    mode_dd.set_selected(initial_mode.selected_index());
+    top.append(&cwd_title);
+    top.append(&cwd_label);
+    top.append(&mode_label);
+    top.append(&mode_dd);
+    root.append(&top);
+
+    let nav_row = GtkBox::new(Orientation::Horizontal, 8);
+    let breadcrumb_box = GtkBox::new(Orientation::Horizontal, 2);
+    breadcrumb_box.set_hexpand(true);
+    let search_entry = Entry::new();
+    search_entry.set_placeholder_text(Some("Search in enhanced ls"));
+    search_entry.set_width_chars(24);
+    let hidden_label = Label::new(Some("Hidden"));
+    let hidden_switch = Switch::new();
+    nav_row.append(&breadcrumb_box);
+    nav_row.append(&search_entry);
+    nav_row.append(&hidden_label);
+    nav_row.append(&hidden_switch);
+    root.append(&nav_row);
+
+    let cmd_row = GtkBox::new(Orientation::Horizontal, 8);
+    let cmd_entry = Entry::new();
+    cmd_entry.set_hexpand(true);
+    cmd_entry.set_placeholder_text(Some("Type command (ls, cd, pwd, cat, ... )"));
+    let run_btn = Button::with_label("Run");
+    cmd_row.append(&cmd_entry);
+    cmd_row.append(&run_btn);
+
+    let paned = Paned::new(Orientation::Horizontal);
+    paned.set_wide_handle(true);
+    paned.set_resize_start_child(true);
+    paned.set_resize_end_child(true);
+    paned.set_shrink_start_child(true);
+    paned.set_shrink_end_child(true);
+
+    let output_scroll = ScrolledWindow::new();
+    output_scroll.set_vexpand(true);
+    output_scroll.set_hexpand(true);
+    let output_box = GtkBox::new(Orientation::Vertical, 8);
+    output_scroll.set_child(Some(&output_box));
+    paned.set_start_child(Some(&output_scroll));
+
+    let preview_panel = GtkBox::new(Orientation::Vertical, 8);
+    preview_panel.set_hexpand(true);
+    preview_panel.set_vexpand(true);
+    preview_panel.set_margin_start(8);
+    let preview_header = GtkBox::new(Orientation::Horizontal, 8);
+    let close_preview_btn = Button::with_label("X");
+    close_preview_btn.set_tooltip_text(Some("Close preview"));
+    let preview_label = Label::new(Some("No selection"));
+    preview_label.set_hexpand(true);
+    preview_label.set_xalign(0.0);
+    preview_label.set_single_line_mode(true);
+    preview_label.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
+    let open_system_btn = Button::with_label("Open With System");
+    open_system_btn.set_sensitive(false);
+    preview_header.append(&close_preview_btn);
+    preview_header.append(&preview_label);
+    preview_header.append(&open_system_btn);
+    preview_panel.append(&preview_header);
+
+    let preview_stack = gtk4::Stack::new();
+    preview_stack.set_vexpand(true);
+    preview_stack.set_hexpand(true);
+    let placeholder = Label::new(Some("Select a file to preview."));
+    let preview_text = TextView::new();
+    preview_text.set_editable(false);
+    preview_text.set_monospace(true);
+    let preview_text_scroll = ScrolledWindow::new();
+    preview_text_scroll.set_vexpand(true);
+    preview_text_scroll.set_hexpand(true);
+    preview_text_scroll.set_child(Some(&preview_text));
+    let preview_image = DrawingArea::new();
+    preview_image.set_hexpand(true);
+    preview_image.set_vexpand(true);
+    preview_image.set_halign(gtk4::Align::Fill);
+    preview_image.set_valign(gtk4::Align::Fill);
+    let preview_image_buf: Rc<RefCell<Option<gtk4::gdk_pixbuf::Pixbuf>>> =
+        Rc::new(RefCell::new(None));
+    {
+        let buf_ref = preview_image_buf.clone();
+        preview_image.set_draw_func(move |_widget, cr, width, height| {
+            let binding = buf_ref.borrow();
+            let Some(pb) = binding.as_ref() else {
+                return;
+            };
+            let iw = pb.width() as f64;
+            let ih = pb.height() as f64;
+            if iw <= 0.0 || ih <= 0.0 || width <= 0 || height <= 0 {
+                return;
+            }
+            let scale = (width as f64 / iw).min(height as f64 / ih);
+            let draw_w = iw * scale;
+            let draw_h = ih * scale;
+            let x = (width as f64 - draw_w) * 0.5;
+            let y = (height as f64 - draw_h) * 0.5;
+            let _ = cr.save();
+            cr.translate(x, y);
+            cr.scale(scale, scale);
+            cr.set_source_pixbuf(pb, 0.0, 0.0);
+            let _ = cr.paint();
+            let _ = cr.restore();
+        });
+    }
+    preview_stack.add_titled(&placeholder, Some("empty"), "Empty");
+    preview_stack.add_titled(&preview_text_scroll, Some("text"), "Text");
+    preview_stack.add_titled(&preview_image, Some("image"), "Image");
+    preview_stack.set_visible_child_name("empty");
+    preview_panel.append(&preview_stack);
+    let preview_revealer = Revealer::new();
+    preview_revealer.set_transition_type(RevealerTransitionType::SlideLeft);
+    preview_revealer.set_transition_duration(220);
+    preview_revealer.set_reveal_child(false);
+    preview_revealer.set_hexpand(true);
+    preview_revealer.set_vexpand(true);
+    preview_revealer.set_child(Some(&preview_panel));
+    paned.set_end_child(Some(&preview_revealer));
+    paned.set_position(1040);
+
+    let (places_box, place_buttons) = build_places_sidebar();
+    let main_row = GtkBox::new(Orientation::Horizontal, 8);
+    main_row.append(&places_box);
+    main_row.append(&paned);
+
+    root.append(&main_row);
+    root.append(&cmd_row);
+    window.set_child(Some(&root));
+
+    let state = Rc::new(RefCell::new(UiState {
+        cwd,
+        mode: initial_mode,
+        show_hidden: false,
+        search_query: String::new(),
+        output_box: output_box.clone(),
+        cwd_label: cwd_label.clone(),
+        breadcrumb_box: breadcrumb_box.clone(),
+        preview_label: preview_label.clone(),
+        preview_text: preview_text.clone(),
+        preview_image: preview_image.clone(),
+        preview_image_buf: preview_image_buf.clone(),
+        preview_stack: preview_stack.clone(),
+        preview_revealer: preview_revealer.clone(),
+        paned: paned.clone(),
+        open_system_btn: open_system_btn.clone(),
+        selected_path: None,
+    }));
+
+    {
+        let state_mode = state.clone();
+        mode_dd.connect_selected_notify(move |dd| {
+            let mode = RenderMode::from_selected(dd.selected());
+            state_mode.borrow_mut().mode = mode;
+            save_mode(mode);
+            refresh_ls_view(&state_mode);
+        });
+    }
+
+    {
+        let state_search = state.clone();
+        search_entry.connect_changed(move |e| {
+            state_search.borrow_mut().search_query = e.text().to_string();
+            refresh_ls_view(&state_search);
+        });
+    }
+
+    {
+        let state_hidden = state.clone();
+        hidden_switch.connect_active_notify(move |sw| {
+            state_hidden.borrow_mut().show_hidden = sw.is_active();
+            refresh_ls_view(&state_hidden);
+        });
+    }
+
+    {
+        let state_run = state.clone();
+        let cmd_entry_run = cmd_entry.clone();
+        run_btn.connect_clicked(move |_| {
+            let cmd = cmd_entry_run.text().to_string();
+            if !cmd.trim().is_empty() {
+                run_command(&state_run, cmd.trim());
+                cmd_entry_run.set_text("");
+            }
+        });
+    }
+
+    {
+        let state_enter = state.clone();
+        cmd_entry.connect_activate(move |entry| {
+            let cmd = entry.text().to_string();
+            if !cmd.trim().is_empty() {
+                run_command(&state_enter, cmd.trim());
+                entry.set_text("");
+            }
+        });
+    }
+
+    {
+        let state_open = state.clone();
+        open_system_btn.connect_clicked(move |_| {
+            if let Some(path) = state_open.borrow().selected_path.clone() {
+                let _ = Command::new("xdg-open").arg(path).spawn();
+            }
+        });
+    }
+
+    {
+        let state_close = state.clone();
+        close_preview_btn.connect_clicked(move |_| {
+            hide_preview(&state_close);
+        });
+    }
+
+    for (btn, target) in place_buttons {
+        let state_btn = state.clone();
+        btn.connect_clicked(move |_| {
+            if target.is_dir() {
+                {
+                    let mut s = state_btn.borrow_mut();
+                    s.cwd = target.clone();
+                    s.cwd_label.set_text(&s.cwd.display().to_string());
+                }
+                rebuild_breadcrumb(&state_btn);
+                refresh_ls_view(&state_btn);
+            }
+        });
+    }
+
+    rebuild_breadcrumb(&state);
+    load_css();
+    window.present();
+}
+
+fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
+    append_block_label(state, &format!("$ {}", cmd), "noterm-command");
+
+    if cmd == "pwd" {
+        let cwd = state.borrow().cwd.display().to_string();
+        append_block_text(state, &format!("{}\n", cwd));
+        return;
+    }
+
+    if let Some(rest) = cmd.strip_prefix("cd ") {
+        let mut s = state.borrow_mut();
+        let target = resolve_cd_target(&s.cwd, rest.trim());
+        if target.is_dir() {
+            s.cwd = target;
+            s.cwd_label.set_text(&s.cwd.display().to_string());
+            drop(s);
+            rebuild_breadcrumb(state);
+            append_block_text(state, "");
+        } else {
+            drop(s);
+            append_block_text(state, "cd: target is not a directory\n");
+        }
+        return;
+    }
+
+    let cwd = state.borrow().cwd.clone();
+    let output = Command::new("sh")
+        .arg("-lc")
+        .arg(cmd)
+        .current_dir(&cwd)
+        .output();
+
+    match output {
+        Ok(out) => {
+            let mut combined = String::new();
+            combined.push_str(&String::from_utf8_lossy(&out.stdout));
+            combined.push_str(&String::from_utf8_lossy(&out.stderr));
+
+            let mode = state.borrow().mode;
+            if mode != RenderMode::Raw && cmd.starts_with("ls") && out.status.success() {
+                let (show_hidden, query) = {
+                    let s = state.borrow();
+                    (s.show_hidden, s.search_query.clone())
+                };
+                let entries = build_ls_entries_from_fs(&cwd, cmd, show_hidden, &query);
+                if entries.is_empty() {
+                    let parsed = parse_ls_entries(&combined, &cwd);
+                    if parsed.is_empty() {
+                        append_block_text(state, &combined);
+                    } else {
+                        append_ls_block(state, parsed);
+                    }
+                } else {
+                    append_ls_block(state, entries);
+                }
+            } else {
+                append_block_text(state, &combined);
+            }
+        }
+        Err(e) => {
+            append_block_text(state, &format!("Failed to execute command: {}\n", e));
+        }
+    }
+}
+
+fn append_block_label(state: &Rc<RefCell<UiState>>, text: &str, class_name: &str) {
+    let label = Label::new(Some(text));
+    label.set_xalign(0.0);
+    label.add_css_class(class_name);
+    state.borrow().output_box.append(&label);
+}
+
+fn append_block_text(state: &Rc<RefCell<UiState>>, text: &str) {
+    let view = TextView::new();
+    view.set_editable(false);
+    view.set_cursor_visible(false);
+    view.set_monospace(true);
+    view.add_css_class("noterm-output");
+    view.buffer().set_text(text);
+    state.borrow().output_box.append(&view);
+}
+
+fn append_ls_block(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) {
+    let flow = gtk4::FlowBox::new();
+    flow.add_css_class("noterm-list");
+    flow.set_selection_mode(gtk4::SelectionMode::None);
+    flow.set_homogeneous(false);
+    flow.set_min_children_per_line(4);
+    flow.set_max_children_per_line(14);
+    flow.set_row_spacing(4);
+    flow.set_column_spacing(4);
+    flow.set_activate_on_single_click(false);
+    let entries = Rc::new(entries);
+
+    for entry in entries.iter() {
+        let tile_btn = Button::new();
+        tile_btn.add_css_class("noterm-tile");
+        let h = GtkBox::new(Orientation::Horizontal, 6);
+        h.set_margin_top(2);
+        h.set_margin_bottom(2);
+        h.set_margin_start(6);
+        h.set_margin_end(6);
+
+        let mode = state.borrow().mode;
+        let icon = icon_for_entry(mode, entry);
+        if !icon.is_empty() {
+            let icon_label = Label::new(Some(icon));
+            icon_label.add_css_class("noterm-icon");
+            h.append(&icon_label);
+        }
+
+        let name_label = Label::new(Some(&entry.name));
+        name_label.set_xalign(0.0);
+        h.append(&name_label);
+
+        tile_btn.set_child(Some(&h));
+        tile_btn.set_tooltip_text(Some(&format!(
+            "{}  {}  {}\n{}",
+            entry.perms,
+            entry.size,
+            entry.modified,
+            entry.path.display()
+        )));
+
+        let state_click = state.clone();
+        let entry_click = entry.clone();
+        let click = gtk4::GestureClick::new();
+        click.connect_pressed(move |_, n_press, _, _| {
+            if entry_click.kind == EntryKind::Directory && n_press == 1 {
+                {
+                    let mut s = state_click.borrow_mut();
+                    s.cwd = entry_click.path.clone();
+                    s.cwd_label.set_text(&s.cwd.display().to_string());
+                }
+                rebuild_breadcrumb(&state_click);
+                refresh_ls_view(&state_click);
+            } else if n_press == 1 {
+                update_preview(&state_click, &entry_click.path);
+            } else if n_press == 2 && !is_previewable(&entry_click.path) {
+                let _ = Command::new("xdg-open").arg(&entry_click.path).spawn();
+            }
+        });
+        tile_btn.add_controller(click);
+
+        flow.insert(&tile_btn, -1);
+    }
+    state.borrow().output_box.append(&flow);
+}
+
+fn refresh_ls_view(state: &Rc<RefCell<UiState>>) {
+    run_command(state, "ls");
+}
+
+fn build_places_sidebar() -> (GtkBox, Vec<(Button, PathBuf)>) {
+    let box_widget = GtkBox::new(Orientation::Vertical, 6);
+    box_widget.set_width_request(140);
+    let title = Label::new(Some("Places"));
+    title.set_xalign(0.0);
+    box_widget.append(&title);
+
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let docs = home.join("Documents");
+    let dl = home.join("Downloads");
+    let desk = home.join("Desktop");
+    let places = vec![
+        ("Home", home.clone()),
+        ("Desktop", desk),
+        ("Documents", docs),
+        ("Downloads", dl),
+        ("Root", PathBuf::from("/")),
+    ];
+
+    let mut out = Vec::new();
+    for (name, path) in places {
+        if name == "Root" || path.exists() {
+            let btn = Button::with_label(name);
+            btn.set_halign(gtk4::Align::Fill);
+            box_widget.append(&btn);
+            out.push((btn, path));
+        }
+    }
+
+    (box_widget, out)
+}
+
+fn rebuild_breadcrumb(state: &Rc<RefCell<UiState>>) {
+    let (cwd, box_widget) = {
+        let s = state.borrow();
+        (s.cwd.clone(), s.breadcrumb_box.clone())
+    };
+
+    while let Some(child) = box_widget.first_child() {
+        box_widget.remove(&child);
+    }
+
+    let parts: Vec<std::path::Component<'_>> = cwd.components().collect();
+    if parts.is_empty() {
+        return;
+    }
+
+    let mut current = PathBuf::new();
+    for (idx, comp) in parts.iter().enumerate() {
+        let part = comp.as_os_str().to_string_lossy().to_string();
+        if idx == 0 && part == "/" {
+            current.push("/");
+        } else {
+            current.push(&part);
+        }
+
+        let btn = Button::with_label(if part.is_empty() { "/" } else { &part });
+        btn.add_css_class("noterm-breadcrumb");
+        let target = current.clone();
+        let state_btn = state.clone();
+        btn.connect_clicked(move |_| {
+            if target.is_dir() {
+                {
+                    let mut s = state_btn.borrow_mut();
+                    s.cwd = target.clone();
+                    s.cwd_label.set_text(&s.cwd.display().to_string());
+                }
+                rebuild_breadcrumb(&state_btn);
+                refresh_ls_view(&state_btn);
+            }
+        });
+        box_widget.append(&btn);
+        if idx + 1 < parts.len() {
+            box_widget.append(&Label::new(Some(">")));
+        }
+    }
+}
+
+fn resolve_cd_target(cwd: &Path, arg: &str) -> PathBuf {
+    if arg == "~" {
+        return dirs::home_dir().unwrap_or_else(|| cwd.to_path_buf());
+    }
+    let p = Path::new(arg);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        cwd.join(p)
+    }
+}
+
+fn parse_ls_entries(output: &str, cwd: &Path) -> Vec<LsEntry> {
+    let mut entries = Vec::new();
+    for line in output.lines() {
+        if line.trim().is_empty() || line.starts_with("total ") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 9 {
+            continue;
+        }
+        let perms = parts[0].to_string();
+        let size = parts[4].to_string();
+        let modified = format!("{} {} {}", parts[5], parts[6], parts[7]);
+        let name = parts[8..].join(" ");
+        if name == "." || name == ".." {
+            continue;
+        }
+        let kind = match perms.chars().next() {
+            Some('d') => EntryKind::Directory,
+            Some('l') => EntryKind::Symlink,
+            Some('-') => EntryKind::File,
+            _ => EntryKind::Other,
+        };
+        entries.push(LsEntry {
+            name: name.clone(),
+            path: cwd.join(name),
+            kind,
+            perms,
+            size,
+            modified,
+        });
+    }
+    entries
+}
+
+fn build_ls_entries_from_fs(cwd: &Path, cmd: &str, show_hidden: bool, query: &str) -> Vec<LsEntry> {
+    let include_hidden = show_hidden || ls_show_hidden(cmd);
+    let q = query.trim().to_lowercase();
+    let target = ls_target_dir(cwd, cmd).unwrap_or_else(|| cwd.to_path_buf());
+    let mut entries = Vec::new();
+    let rd = match std::fs::read_dir(&target) {
+        Ok(v) => v,
+        Err(_) => return entries,
+    };
+
+    // Always include parent navigation first.
+    let parent = cwd.parent().unwrap_or(cwd).to_path_buf();
+    entries.push(LsEntry {
+        name: "..".to_string(),
+        path: parent,
+        kind: EntryKind::Directory,
+        perms: "drwxr-xr-x".to_string(),
+        size: "-".to_string(),
+        modified: "-".to_string(),
+    });
+
+    for item in rd.flatten() {
+        let name = item.file_name().to_string_lossy().to_string();
+        if !include_hidden && name.starts_with('.') {
+            continue;
+        }
+        if !q.is_empty() && !name.to_lowercase().contains(&q) {
+            continue;
+        }
+        let path = item.path();
+        let md = match item.metadata() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let file_type = match item.file_type() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let kind = if file_type.is_dir() {
+            EntryKind::Directory
+        } else if file_type.is_symlink() {
+            EntryKind::Symlink
+        } else if file_type.is_file() {
+            EntryKind::File
+        } else {
+            EntryKind::Other
+        };
+        entries.push(LsEntry {
+            name,
+            path,
+            kind,
+            perms: perms_from_meta(&md, kind),
+            size: human_size(md.len()),
+            modified: modified_short(&md),
+        });
+    }
+
+    if entries.len() > 1 {
+        entries[1..].sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    }
+    entries
+}
+
+fn ls_show_hidden(cmd: &str) -> bool {
+    cmd.split_whitespace().any(|t| {
+        t == "-a"
+            || t == "--all"
+            || t == "-A"
+            || (t.starts_with('-') && t.contains('a'))
+            || (t.starts_with('-') && t.contains('A'))
+    })
+}
+
+fn ls_target_dir(cwd: &Path, cmd: &str) -> Option<PathBuf> {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    if parts.is_empty() || parts[0] != "ls" {
+        return None;
+    }
+    let mut candidate: Option<&str> = None;
+    for p in parts.iter().skip(1) {
+        if p.starts_with('-') {
+            continue;
+        }
+        candidate = Some(p);
+    }
+    let c = candidate?;
+    let p = Path::new(c);
+    let resolved = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        cwd.join(p)
+    };
+    if resolved.is_dir() {
+        Some(resolved)
+    } else {
+        None
+    }
+}
+
+fn perms_from_meta(md: &std::fs::Metadata, kind: EntryKind) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = md.permissions().mode() & 0o777;
+        let mut s = String::new();
+        s.push(match kind {
+            EntryKind::Directory => 'd',
+            EntryKind::Symlink => 'l',
+            EntryKind::File => '-',
+            EntryKind::Other => '?',
+        });
+        for shift in [6, 3, 0] {
+            let bits = (mode >> shift) & 0o7;
+            s.push(if bits & 0o4 != 0 { 'r' } else { '-' });
+            s.push(if bits & 0o2 != 0 { 'w' } else { '-' });
+            s.push(if bits & 0o1 != 0 { 'x' } else { '-' });
+        }
+        s
+    }
+    #[cfg(not(unix))]
+    {
+        String::from("----------")
+    }
+}
+
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{}{}", bytes, UNITS[unit])
+    } else {
+        format!("{:.1}{}", value, UNITS[unit])
+    }
+}
+
+fn modified_short(md: &std::fs::Metadata) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = md
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        });
+    secs.to_string()
+}
+
+fn icon_for_entry(mode: RenderMode, entry: &LsEntry) -> &'static str {
+    match mode {
+        RenderMode::Raw | RenderMode::Text => "",
+        RenderMode::Icons => match entry.kind {
+            EntryKind::Directory => "📁",
+            EntryKind::Symlink => "🔗",
+            EntryKind::File => icon_for_file_emoji(&entry.path),
+            EntryKind::Other => "❓",
+        },
+        RenderMode::Nerd => match entry.kind {
+            EntryKind::Directory => "\u{f115}",
+            EntryKind::Symlink => "\u{f481}",
+            EntryKind::File => nerd_for_file(&entry.path),
+            EntryKind::Other => "\u{f059}",
+        },
+    }
+}
+
+fn icon_for_file_emoji(path: &Path) -> &'static str {
+    if is_image(path) {
+        "🖼️"
+    } else if is_text(path) {
+        "📄"
+    } else {
+        "📦"
+    }
+}
+
+fn nerd_for_file(path: &Path) -> &'static str {
+    if is_image(path) {
+        "\u{f71e}"
+    } else if is_text(path) {
+        "\u{f15c}"
+    } else {
+        "\u{f016}"
+    }
+}
+
+fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn is_text(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "txt"
+                    | "md"
+                    | "markdown"
+                    | "rs"
+                    | "toml"
+                    | "json"
+                    | "yaml"
+                    | "yml"
+                    | "log"
+                    | "css"
+                    | "js"
+                    | "ts"
+                    | "sh"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn is_previewable(path: &Path) -> bool {
+    is_image(path) || is_text(path)
+}
+
+fn noterm_mode_path() -> PathBuf {
+    rdm_common::config::config_dir().join("noterm-mode")
+}
+
+fn load_saved_mode() -> RenderMode {
+    let path = noterm_mode_path();
+    match std::fs::read_to_string(path) {
+        Ok(v) => RenderMode::from_str(&v),
+        Err(_) => RenderMode::Raw,
+    }
+}
+
+fn save_mode(mode: RenderMode) {
+    let path = noterm_mode_path();
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create config directory for NoTerm mode: {}", e);
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&path, format!("{}\n", mode.as_str())) {
+        log::warn!("Failed to save NoTerm mode to {}: {}", path.display(), e);
+    }
+}
+
+fn show_preview_panel(state: &Rc<RefCell<UiState>>) {
+    let s = state.borrow();
+    s.preview_revealer.set_reveal_child(true);
+    let width = s.paned.width();
+    let usable = if width > 0 { width } else { 1100 };
+    let start_width = ((usable as f64) * 0.25).round() as i32;
+    s.paned.set_position(start_width.max(220));
+}
+
+fn hide_preview(state: &Rc<RefCell<UiState>>) {
+    let mut s = state.borrow_mut();
+    s.preview_revealer.set_reveal_child(false);
+    s.selected_path = None;
+    s.preview_label.set_text("No selection");
+    s.open_system_btn.set_sensitive(false);
+    *s.preview_image_buf.borrow_mut() = None;
+    s.preview_stack.set_visible_child_name("empty");
+    let width = s.paned.width();
+    let usable = if width > 0 { width } else { 1100 };
+    s.paned.set_position(usable.saturating_sub(24));
+}
+
+fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
+    let mut s = state.borrow_mut();
+    s.selected_path = Some(path.to_path_buf());
+    s.preview_label.set_text(&path.display().to_string());
+    s.open_system_btn.set_sensitive(true);
+
+    if is_image(path) {
+        match gtk4::gdk_pixbuf::Pixbuf::from_file(path) {
+            Ok(pb) => {
+                *s.preview_image_buf.borrow_mut() = Some(pb);
+                s.preview_image.queue_draw();
+                s.preview_stack.set_visible_child_name("image");
+                drop(s);
+                show_preview_panel(state);
+                return;
+            }
+            Err(e) => {
+                *s.preview_image_buf.borrow_mut() = None;
+                s.preview_text
+                    .buffer()
+                    .set_text(&format!("Failed to decode image: {}", e));
+                s.preview_stack.set_visible_child_name("text");
+                drop(s);
+                show_preview_panel(state);
+                return;
+            }
+        }
+    }
+
+    if is_text(path) {
+        *s.preview_image_buf.borrow_mut() = None;
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let preview = truncate_chars(&content, 30_000);
+                s.preview_text.buffer().set_text(&preview);
+            }
+            Err(e) => {
+                s.preview_text
+                    .buffer()
+                    .set_text(&format!("Failed to read file: {}", e));
+            }
+        }
+        s.preview_stack.set_visible_child_name("text");
+        drop(s);
+        show_preview_panel(state);
+        return;
+    }
+
+    drop(s);
+    hide_preview(state);
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    let mut out = String::new();
+    for (count, ch) in s.chars().enumerate() {
+        if count >= max {
+            out.push_str("\n\n[truncated]");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn load_css() {
+    let css = CssProvider::new();
+    let extra = r#"
+        .noterm-command { font-weight: bold; }
+        .noterm-output { padding: 2px 4px; }
+        .noterm-list row { padding: 4px 6px; }
+        .noterm-tile { border: none; background: transparent; padding: 0; }
+        .noterm-tile:hover { background: alpha(@theme_surface, 0.9); }
+        .noterm-breadcrumb { border: none; background: transparent; padding: 2px 6px; }
+        .noterm-breadcrumb:hover { background: alpha(@theme_surface, 0.9); }
+        .noterm-meta { opacity: 0.75; font-size: 11px; }
+        .noterm-icon {
+            font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
+        }
+    "#;
+    let full = format!("{}\n{}", rdm_common::theme::load_theme_css(), extra);
+    css.load_from_data(&full);
+    gtk4::style_context_add_provider_for_display(
+        &gtk4::gdk::Display::default().expect("No display"),
+        &css,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER + 1,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ls_entries_basic() {
+        let cwd = PathBuf::from("/tmp");
+        let output = "\
+drwxr-xr-x 2 user user 4096 Mar  5 12:00 folder
+-rw-r--r-- 1 user user  123 Mar  5 12:01 notes.md
+lrwxrwxrwx 1 user user   10 Mar  5 12:02 link -> target
+";
+        let entries = parse_ls_entries(output, &cwd);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].kind, EntryKind::Directory);
+        assert_eq!(entries[1].kind, EntryKind::File);
+        assert_eq!(entries[2].kind, EntryKind::Symlink);
+        assert_eq!(entries[1].path, PathBuf::from("/tmp/notes.md"));
+    }
+
+    #[test]
+    fn parse_ls_entries_ignores_total_and_empty_lines() {
+        let cwd = PathBuf::from("/tmp");
+        let output = "total 8\n\n-rw-r--r-- 1 u g 1 Mar 5 12:00 a.txt\n";
+        let entries = parse_ls_entries(output, &cwd);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "a.txt");
+    }
+
+    #[test]
+    fn file_type_detection() {
+        assert!(is_image(Path::new("pic.png")));
+        assert!(is_text(Path::new("readme.md")));
+        assert!(!is_text(Path::new("archive.tar.gz")));
+        assert!(is_previewable(Path::new("image.webp")));
+        assert!(is_previewable(Path::new("main.rs")));
+        assert!(!is_previewable(Path::new("binary.bin")));
+    }
+
+    #[test]
+    fn icon_mapping_by_mode() {
+        let dir = LsEntry {
+            name: "d".to_string(),
+            path: PathBuf::from("d"),
+            kind: EntryKind::Directory,
+            perms: "drwxr-xr-x".to_string(),
+            size: "4096".to_string(),
+            modified: "Mar 5 12:00".to_string(),
+        };
+        let file = LsEntry {
+            name: "f".to_string(),
+            path: PathBuf::from("f.md"),
+            kind: EntryKind::File,
+            perms: "-rw-r--r--".to_string(),
+            size: "1".to_string(),
+            modified: "Mar 5 12:00".to_string(),
+        };
+        assert_eq!(icon_for_entry(RenderMode::Raw, &dir), "");
+        assert_eq!(icon_for_entry(RenderMode::Text, &dir), "");
+        assert_eq!(icon_for_entry(RenderMode::Icons, &dir), "📁");
+        assert_eq!(icon_for_entry(RenderMode::Nerd, &dir), "\u{f115}");
+        assert_eq!(icon_for_entry(RenderMode::Icons, &file), "📄");
+        assert_eq!(icon_for_entry(RenderMode::Nerd, &file), "\u{f15c}");
+    }
+
+    #[test]
+    fn resolve_cd_target_handles_absolute_relative_and_home() {
+        let cwd = Path::new("/home/test/work");
+        assert_eq!(
+            resolve_cd_target(cwd, "sub"),
+            PathBuf::from("/home/test/work/sub")
+        );
+        assert_eq!(
+            resolve_cd_target(cwd, "/var/tmp"),
+            PathBuf::from("/var/tmp")
+        );
+        let home = dirs::home_dir().unwrap_or_else(|| cwd.to_path_buf());
+        assert_eq!(resolve_cd_target(cwd, "~"), home);
+    }
+
+    #[test]
+    fn enhanced_ls_includes_parent_as_first_item() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rdm-noterm-ls-{}", nanos));
+        std::fs::create_dir_all(root.join("child")).expect("mkdir");
+        std::fs::write(root.join("a.txt"), "x").expect("write");
+
+        let entries = build_ls_entries_from_fs(&root, "ls", false, "");
+        assert!(!entries.is_empty());
+        assert_eq!(entries[0].name, "..");
+        assert_eq!(entries[0].kind, EntryKind::Directory);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

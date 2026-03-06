@@ -65,7 +65,9 @@ pub fn build_clock_widget(format: &str) -> MenuButton {
         let date_label = date_label.clone();
         calendar.connect_day_selected(move |cal| {
             let dt = cal.date();
-            if let Some(nd) = NaiveDate::from_ymd_opt(dt.year(), dt.month() as u32, dt.day_of_month() as u32) {
+            if let Some(nd) =
+                NaiveDate::from_ymd_opt(dt.year(), dt.month() as u32, dt.day_of_month() as u32)
+            {
                 date_label.set_label(&nd.format("%A, %B %-d, %Y").to_string());
             }
         });

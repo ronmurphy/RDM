@@ -24,6 +24,7 @@ fn build_watermark(app: &Application, version: &str) {
         .default_width(1)
         .default_height(1)
         .build();
+    window.add_css_class("watermark-window");
 
     // Layer shell: Bottom layer — sits above wallpaper but below all windows
     window.init_layer_shell();
@@ -56,7 +57,7 @@ fn load_css() {
     let theme_css = rdm_common::theme::load_theme_css();
     // Transparent background is mandatory for watermark, regardless of theme
     let full_css = format!(
-        "window.background {{ background-color: transparent; }}\n{}",
+        ".watermark-window {{ background-color: transparent; }}\n{}",
         theme_css,
     );
 

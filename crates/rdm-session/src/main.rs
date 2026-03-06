@@ -109,11 +109,7 @@ async fn main() {
             if let Some(ref mut child) = proc.child {
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        log::warn!(
-                            "{} exited with status: {}",
-                            proc.entry.name,
-                            status
-                        );
+                        log::warn!("{} exited with status: {}", proc.entry.name, status);
                         if proc.entry.restart {
                             log::info!("Restarting: {}", proc.entry.name);
                             proc.child = spawn_process(&proc.entry);

@@ -33,7 +33,8 @@ AUTOSTART="$LABWC_DIR/autostart"
 cat > "$AUTOSTART" << 'EOF'
 #!/bin/sh
 # RDM autostart — managed by rdm-start
-rdm-session &
+LOG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/rdm.log"
+rdm-session >> "$LOG_FILE" 2>&1 &
 EOF
 chmod +x "$AUTOSTART"
 

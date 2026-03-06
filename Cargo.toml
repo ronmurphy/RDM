@@ -8,6 +8,7 @@ members = [
     "crates/rdm-watermark",
     "crates/rdm-settings",
     "crates/rdm-notify",
+    "crates/rdm-noterm",
 ]
 resolver = "2"
 

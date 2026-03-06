@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
+use rdm_common::theme::ThemeLayout;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -48,8 +49,7 @@ fn build_panel(app: &Application, config: &RdmConfig) {
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| format!("unknown-{}", i));
                 log::info!("Creating panel for monitor: {}", connector);
-                let win =
-                    build_panel_window(app, config, &monitor, &shared_state, &action_tx);
+                let win = build_panel_window(app, config, &monitor, &shared_state, &action_tx);
                 windows.borrow_mut().insert(connector, win);
             }
         }
@@ -71,6 +71,7 @@ fn build_panel_window(
     shared_state: &Arc<Mutex<toplevel::SharedState>>,
     action_tx: &Rc<std::sync::mpsc::Sender<toplevel::ToplevelAction>>,
 ) -> ApplicationWindow {
+    let layout = rdm_common::theme::load_active_theme_layout();
     let window = ApplicationWindow::builder()
         .application(app)
         .title("RDM Panel")
@@ -95,9 +96,21 @@ fn build_panel_window(
 
     window.auto_exclusive_zone_enable();
 
-    // Main horizontal layout
-    let hbox = gtk4::Box::new(Orientation::Horizontal, 0);
-    hbox.add_css_class("panel");
+    // Main horizontal layout split into left/center/right zones.
+    let center_box = gtk4::CenterBox::new();
+    center_box.add_css_class("panel");
+
+    let left_zone = gtk4::Box::new(Orientation::Horizontal, 4);
+    let center_zone = gtk4::Box::new(Orientation::Horizontal, 4);
+    let right_zone = gtk4::Box::new(Orientation::Horizontal, 4);
+
+    center_zone.set_halign(gtk4::Align::Center);
+    center_zone.set_hexpand(true);
+    right_zone.set_halign(gtk4::Align::End);
+
+    center_box.set_start_widget(Some(&left_zone));
+    center_box.set_center_widget(Some(&center_zone));
+    center_box.set_end_widget(Some(&right_zone));
 
     // Left: launcher button → spawns rdm-launcher
     let launcher_btn = gtk4::Button::with_label("  Apps  ");
@@ -114,38 +127,106 @@ fn build_panel_window(
                     let _ = child.wait();
                 });
             }
-            Err(e) => log::error!("Failed to launch rdm-launcher: {}", e),
+            Err(e) => {
+                log::error!("Failed to launch rdm-launcher: {}", e);
+                let _ = std::process::Command::new("dbus-send")
+                    .args([
+                        "--session",
+                        "--dest=org.freedesktop.Notifications",
+                        "--type=method_call",
+                        "/org/freedesktop/Notifications",
+                        "org.freedesktop.Notifications.Notify",
+                        "string:rdm-panel",
+                        "uint32:0",
+                        "string:",
+                        "string:Launcher failed",
+                        &format!("string:{}", e),
+                        "array:string:",
+                        "dict:string:variant:",
+                        "int32:4000",
+                    ])
+                    .status();
+            }
         }
     });
-    hbox.append(&launcher_btn);
-
-    // Separator
-    let sep = gtk4::Separator::new(Orientation::Vertical);
-    hbox.append(&sep);
-
     // Center: taskbar (running windows) — uses shared toplevel tracker
     let taskbar_box = gtk4::Box::new(Orientation::Horizontal, 4);
-    taskbar_box.set_hexpand(true);
-    taskbar_box.set_halign(gtk4::Align::Start);
     taskbar_box.add_css_class("taskbar");
+    taskbar_box.set_halign(gtk4::Align::Center);
     let mode = taskbar::TaskbarMode::from_str(&config.panel.taskbar_mode);
     taskbar::setup_taskbar_with_shared(&taskbar_box, mode, shared_state, action_tx);
-    hbox.append(&taskbar_box);
 
-    // Right: clock (with calendar popover)
-    if config.panel.show_clock {
-        let clock_widget = clock::build_clock_widget(&config.panel.clock_format);
-        hbox.append(&clock_widget);
+    // Right: clock (with calendar popover), optional.
+    let clock_widget = if config.panel.show_clock {
+        Some(clock::build_clock_widget(&config.panel.clock_format))
+    } else {
+        None
+    };
+
+    // Right: system tray (battery + power menu).
+    let tray = tray::setup_tray(app, mode);
+
+    append_panel_widget(
+        &layout,
+        "launcher",
+        &launcher_btn,
+        &left_zone,
+        &center_zone,
+        &right_zone,
+    );
+    append_panel_widget(
+        &layout,
+        "taskbar",
+        &taskbar_box,
+        &left_zone,
+        &center_zone,
+        &right_zone,
+    );
+    if let Some(clock_widget) = clock_widget.as_ref() {
+        append_panel_widget(
+            &layout,
+            "clock",
+            clock_widget,
+            &left_zone,
+            &center_zone,
+            &right_zone,
+        );
     }
+    append_panel_widget(
+        &layout,
+        "tray",
+        &tray,
+        &left_zone,
+        &center_zone,
+        &right_zone,
+    );
 
-    // Right: system tray (battery + power menu)
-    let tray = tray::setup_tray(app);
-    hbox.append(&tray);
-
-    window.set_child(Some(&hbox));
+    window.set_child(Some(&center_box));
 
     window.present();
     window
+}
+
+fn append_panel_widget<W: IsA<gtk4::Widget>>(
+    layout: &ThemeLayout,
+    role: &str,
+    widget: &W,
+    left_zone: &gtk4::Box,
+    center_zone: &gtk4::Box,
+    right_zone: &gtk4::Box,
+) {
+    let target = match role {
+        "launcher" => layout.panel.launcher.as_str(),
+        "taskbar" => layout.panel.taskbar.as_str(),
+        "clock" => layout.panel.clock.as_str(),
+        "tray" => layout.panel.tray.as_str(),
+        _ => "left",
+    };
+    match target {
+        "center" => center_zone.append(widget),
+        "right" => right_zone.append(widget),
+        _ => left_zone.append(widget),
+    }
 }
 
 fn load_css() {

@@ -21,9 +21,9 @@ ACTION="${1:-up}"
 
 case "$ACTION" in
     up)
-        wpctl set-volume "$SINK" 5%+
-        # Cap at 100%
-        wpctl set-volume "$SINK" --limit 1.0 5%+ 2>/dev/null || true
+        # Raise once, capped at 100% when supported by this wpctl version.
+        wpctl set-volume "$SINK" --limit 1.0 5%+ 2>/dev/null \
+            || wpctl set-volume "$SINK" 5%+
         ;;
     down)
         wpctl set-volume "$SINK" 5%-

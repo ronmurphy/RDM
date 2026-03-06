@@ -83,22 +83,18 @@ pub fn register_notification_service(
 
     let node_info = gio::DBusNodeInfo::for_xml(INTROSPECTION_XML)
         .expect("Failed to parse notification introspection XML");
-    let interface_info = node_info.lookup_interface("org.freedesktop.Notifications")
+    let interface_info = node_info
+        .lookup_interface("org.freedesktop.Notifications")
         .expect("Interface not found in XML");
 
     // Register object first, then claim the name
     let registration_id = match connection
         .register_object("/org/freedesktop/Notifications", &interface_info)
-        .method_call(move |_conn, _sender, _path, _iface, method, params, invocation| {
-            handle_method_call(
-                method,
-                params,
-                invocation,
-                &next_id,
-                &on_notify,
-                &on_close,
-            );
-        })
+        .method_call(
+            move |_conn, _sender, _path, _iface, method, params, invocation| {
+                handle_method_call(method, params, invocation, &next_id, &on_notify, &on_close);
+            },
+        )
         .build()
     {
         Ok(id) => {

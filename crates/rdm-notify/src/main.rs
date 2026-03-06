@@ -162,10 +162,13 @@ fn show_notification(
     {
         let mut s = state.borrow_mut();
         s.order.push(id);
-        s.active.insert(id, ActiveNotification {
-            window: window.clone(),
-            timeout_source: None,
-        });
+        s.active.insert(
+            id,
+            ActiveNotification {
+                window: window.clone(),
+                timeout_source: None,
+            },
+        );
     }
 
     window.present();
@@ -217,9 +220,15 @@ fn restack(state: &Rc<RefCell<NotificationState>>) {
 
     for &id in &s.order {
         if let Some(entry) = s.active.get(&id) {
-            entry.window.set_margin(gtk4_layer_shell::Edge::Top, y_offset);
+            entry
+                .window
+                .set_margin(gtk4_layer_shell::Edge::Top, y_offset);
             let (_, natural) = entry.window.preferred_size();
-            let h = if natural.height() > 0 { natural.height() } else { 80 };
+            let h = if natural.height() > 0 {
+                natural.height()
+            } else {
+                80
+            };
             y_offset += h + NOTIFICATION_GAP;
         }
     }

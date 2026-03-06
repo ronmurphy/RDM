@@ -1,18 +1,108 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config;
+pub const CURRENT_THEME_META_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_LAYOUT_SCHEMA_VERSION: u32 = 1;
 
 // ─── Types ───────────────────────────────────────────────────────
 
 /// Metadata about an available theme
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ThemeMeta {
+    #[serde(
+        default = "default_legacy_theme_meta_schema_version",
+        alias = "version"
+    )]
+    pub schema_version: u32,
     pub name: String,
     pub display_name: String,
     #[serde(default)]
     pub author: String,
     #[serde(default)]
     pub description: String,
+}
+
+/// Theme-scoped layout profile.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ThemeLayout {
+    #[serde(default = "default_legacy_layout_schema_version", alias = "version")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub panel: PanelLayout,
+    #[serde(default)]
+    pub launcher: LauncherLayout,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PanelLayout {
+    #[serde(default = "default_left")]
+    pub launcher: String,
+    #[serde(default = "default_center")]
+    pub taskbar: String,
+    #[serde(default = "default_right")]
+    pub clock: String,
+    #[serde(default = "default_right")]
+    pub tray: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LauncherLayout {
+    #[serde(default = "default_right")]
+    pub favorites_side: String,
+    #[serde(default = "default_left")]
+    pub settings_side: String,
+}
+
+fn default_left() -> String {
+    "left".to_string()
+}
+fn default_legacy_theme_meta_schema_version() -> u32 {
+    0
+}
+fn default_legacy_layout_schema_version() -> u32 {
+    0
+}
+fn default_theme_meta_schema_version() -> u32 {
+    CURRENT_THEME_META_SCHEMA_VERSION
+}
+fn default_layout_schema_version() -> u32 {
+    CURRENT_LAYOUT_SCHEMA_VERSION
+}
+fn default_center() -> String {
+    "center".to_string()
+}
+fn default_right() -> String {
+    "right".to_string()
+}
+
+impl Default for ThemeLayout {
+    fn default() -> Self {
+        Self {
+            schema_version: default_layout_schema_version(),
+            panel: PanelLayout::default(),
+            launcher: LauncherLayout::default(),
+        }
+    }
+}
+
+impl Default for PanelLayout {
+    fn default() -> Self {
+        Self {
+            launcher: default_left(),
+            taskbar: default_center(),
+            clock: default_right(),
+            tray: default_right(),
+        }
+    }
+}
+
+impl Default for LauncherLayout {
+    fn default() -> Self {
+        Self {
+            favorites_side: default_right(),
+            settings_side: default_left(),
+        }
+    }
 }
 
 // ─── Built-in themes ─────────────────────────────────────────────
@@ -119,6 +209,12 @@ pub fn load_theme_css() -> String {
     load_theme_css_for(&theme)
 }
 
+/// Load layout for the active theme, or defaults if none exists.
+pub fn load_active_theme_layout() -> ThemeLayout {
+    let theme = config::RdmConfig::load().appearance.theme;
+    load_theme_layout_for(&theme)
+}
+
 /// List all available themes (built-in + user), deduplicated by name.
 pub fn list_themes() -> Vec<ThemeMeta> {
     let mut themes = Vec::new();
@@ -133,6 +229,7 @@ pub fn list_themes() -> Vec<ThemeMeta> {
                 let meta_path = entry.path().join("theme.toml");
                 if let Ok(contents) = std::fs::read_to_string(&meta_path) {
                     if let Ok(meta) = toml::from_str::<ThemeMeta>(&contents) {
+                        let meta = migrate_theme_meta(meta, &name);
                         seen.insert(name);
                         themes.push(meta);
                     }
@@ -146,7 +243,7 @@ pub fn list_themes() -> Vec<ThemeMeta> {
         if !seen.contains(name) {
             if let Some(files) = builtin::get(name) {
                 if let Ok(meta) = toml::from_str::<ThemeMeta>(files.meta) {
-                    themes.push(meta);
+                    themes.push(migrate_theme_meta(meta, name));
                 }
             }
         }
@@ -154,6 +251,17 @@ pub fn list_themes() -> Vec<ThemeMeta> {
 
     themes.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     themes
+}
+
+/// Load layout profile for a specific theme.
+pub fn load_theme_layout_for(theme_name: &str) -> ThemeLayout {
+    let user_dir = config::config_dir().join("themes").join(theme_name);
+    let path = user_dir.join("layout.toml");
+    let layout = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| toml::from_str::<ThemeLayout>(&s).ok())
+        .unwrap_or_default();
+    migrate_theme_layout(layout, theme_name)
 }
 
 // ─── Internal ────────────────────────────────────────────────────
@@ -189,8 +297,7 @@ fn assemble_theme(theme_name: &str) -> Option<String> {
     // in the theme root (~/.config/rdm/themes/style.css).
     let shared_style = {
         let user_shared = config::config_dir().join("themes").join("style.css");
-        std::fs::read_to_string(&user_shared)
-            .unwrap_or_else(|_| builtin::SHARED_STYLE.to_string())
+        std::fs::read_to_string(&user_shared).unwrap_or_else(|_| builtin::SHARED_STYLE.to_string())
     };
 
     // ── 3. Overrides ─────────────────────────────────────────
@@ -265,12 +372,14 @@ pub fn save_user_theme(
     slug: &str,
     display_name: &str,
     colors: &[ThemeColor],
+    layout: Option<&ThemeLayout>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dir = config::config_dir().join("themes").join(slug);
     std::fs::create_dir_all(&dir)?;
 
     // theme.toml
     let meta = ThemeMeta {
+        schema_version: default_theme_meta_schema_version(),
         name: slug.to_string(),
         display_name: display_name.to_string(),
         author: "User".to_string(),
@@ -289,6 +398,11 @@ pub fn save_user_theme(
         std::fs::write(&overrides_path, "/* Custom overrides */\n")?;
     }
 
+    // layout.toml
+    let layout = layout.cloned().unwrap_or_default();
+    let layout_toml = toml::to_string_pretty(&layout)?;
+    std::fs::write(dir.join("layout.toml"), layout_toml)?;
+
     Ok(())
 }
 
@@ -298,4 +412,211 @@ pub fn list_theme_slugs() -> Vec<(String, String)> {
         .into_iter()
         .map(|t| (t.name, t.display_name))
         .collect()
+}
+
+fn migrate_theme_meta(mut meta: ThemeMeta, theme_name: &str) -> ThemeMeta {
+    if meta.schema_version > CURRENT_THEME_META_SCHEMA_VERSION {
+        log::warn!(
+            "Theme meta '{}' schema {} is newer than supported {}; loading with best effort",
+            theme_name,
+            meta.schema_version,
+            CURRENT_THEME_META_SCHEMA_VERSION
+        );
+        return meta;
+    }
+
+    let start = meta.schema_version;
+    while meta.schema_version < CURRENT_THEME_META_SCHEMA_VERSION {
+        meta = match meta.schema_version {
+            0 => migrate_theme_meta_v0_to_v1(meta),
+            v => {
+                log::warn!(
+                    "No migration step defined for theme meta '{}' schema {}; forcing {}",
+                    theme_name,
+                    v,
+                    CURRENT_THEME_META_SCHEMA_VERSION
+                );
+                let mut forced = meta;
+                forced.schema_version = CURRENT_THEME_META_SCHEMA_VERSION;
+                forced
+            }
+        };
+    }
+
+    if start != meta.schema_version {
+        log::info!(
+            "Upgraded theme meta '{}' schema {} -> {}",
+            theme_name,
+            start,
+            meta.schema_version
+        );
+    }
+    meta
+}
+
+fn migrate_theme_layout(mut layout: ThemeLayout, theme_name: &str) -> ThemeLayout {
+    if layout.schema_version > CURRENT_LAYOUT_SCHEMA_VERSION {
+        log::warn!(
+            "Theme layout '{}' schema {} is newer than supported {}; loading with best effort",
+            theme_name,
+            layout.schema_version,
+            CURRENT_LAYOUT_SCHEMA_VERSION
+        );
+        return layout;
+    }
+
+    let start = layout.schema_version;
+    while layout.schema_version < CURRENT_LAYOUT_SCHEMA_VERSION {
+        layout = match layout.schema_version {
+            0 => migrate_layout_v0_to_v1(layout),
+            v => {
+                log::warn!(
+                    "No migration step defined for theme layout '{}' schema {}; forcing {}",
+                    theme_name,
+                    v,
+                    CURRENT_LAYOUT_SCHEMA_VERSION
+                );
+                let mut forced = layout;
+                forced.schema_version = CURRENT_LAYOUT_SCHEMA_VERSION;
+                forced
+            }
+        };
+    }
+
+    if start != layout.schema_version {
+        log::info!(
+            "Upgraded theme layout '{}' schema {} -> {}",
+            theme_name,
+            start,
+            layout.schema_version
+        );
+    }
+    layout
+}
+
+fn migrate_theme_meta_v0_to_v1(mut meta: ThemeMeta) -> ThemeMeta {
+    meta.schema_version = 1;
+    meta
+}
+
+fn migrate_layout_v0_to_v1(mut layout: ThemeLayout) -> ThemeLayout {
+    layout.schema_version = 1;
+    layout
+}
+
+#[allow(dead_code)]
+fn migrate_theme_meta_v1_to_v2(mut meta: ThemeMeta) -> ThemeMeta {
+    // Reserved for future schema bump.
+    meta.schema_version = 2;
+    meta
+}
+
+#[allow(dead_code)]
+fn migrate_layout_v1_to_v2(mut layout: ThemeLayout) -> ThemeLayout {
+    // Reserved for future schema bump.
+    layout.schema_version = 2;
+    layout
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct XdgConfigGuard {
+        previous: Option<std::ffi::OsString>,
+        root: std::path::PathBuf,
+    }
+
+    impl Drop for XdgConfigGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => {
+                    // SAFETY: test process uses a global mutex to serialize env var mutation.
+                    unsafe { std::env::set_var("XDG_CONFIG_HOME", v) };
+                }
+                None => {
+                    // SAFETY: test process uses a global mutex to serialize env var mutation.
+                    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+                }
+            }
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn with_temp_xdg_config_home() -> XdgConfigGuard {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rdm-common-test-{}", nanos));
+        fs::create_dir_all(&root).expect("create temp root");
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        // SAFETY: test process uses a global mutex to serialize env var mutation.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", &root) };
+        XdgConfigGuard { previous, root }
+    }
+
+    #[test]
+    fn legacy_layout_without_schema_migrates() {
+        let toml = r#"
+[panel]
+launcher = "right"
+taskbar = "center"
+clock = "left"
+tray = "right"
+"#;
+        let parsed: ThemeLayout = toml::from_str(toml).expect("parse legacy layout");
+        assert_eq!(parsed.schema_version, 0);
+
+        let migrated = migrate_theme_layout(parsed, "test-theme");
+        assert_eq!(migrated.schema_version, CURRENT_LAYOUT_SCHEMA_VERSION);
+        assert_eq!(migrated.panel.launcher, "right");
+        assert_eq!(migrated.panel.clock, "left");
+    }
+
+    #[test]
+    fn save_and_load_theme_layout_roundtrip() {
+        let _env_guard = ENV_LOCK.lock().expect("env lock");
+        let _xdg = with_temp_xdg_config_home();
+
+        let slug = "smoke-layout";
+        let layout = ThemeLayout {
+            schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
+            panel: PanelLayout {
+                launcher: "right".to_string(),
+                taskbar: "left".to_string(),
+                clock: "center".to_string(),
+                tray: "right".to_string(),
+            },
+            launcher: LauncherLayout {
+                favorites_side: "left".to_string(),
+                settings_side: "right".to_string(),
+            },
+        };
+        let colors = vec![
+            ThemeColor {
+                var_name: "theme_bg".to_string(),
+                value: "#101010".to_string(),
+            },
+            ThemeColor {
+                var_name: "theme_fg".to_string(),
+                value: "#f0f0f0".to_string(),
+            },
+        ];
+
+        save_user_theme(slug, "Smoke Layout", &colors, Some(&layout)).expect("save theme");
+        let loaded = load_theme_layout_for(slug);
+
+        assert_eq!(loaded.schema_version, CURRENT_LAYOUT_SCHEMA_VERSION);
+        assert_eq!(loaded.panel.launcher, "right");
+        assert_eq!(loaded.panel.taskbar, "left");
+        assert_eq!(loaded.panel.clock, "center");
+        assert_eq!(loaded.launcher.favorites_side, "left");
+        assert_eq!(loaded.launcher.settings_side, "right");
+    }
 }

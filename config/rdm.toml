@@ -1,5 +1,7 @@
 # RDM Desktop Configuration
 
+schema_version = 1
+
 [appearance]
 theme = "tokyo-night"
 

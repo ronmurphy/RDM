@@ -84,11 +84,14 @@ pub fn setup_taskbar_with_shared(
         gtk4::glib::ControlFlow::Continue
     });
 
-    log::info!("Taskbar initialized (mode: {:?})", match mode {
-        TaskbarMode::Text => "text",
-        TaskbarMode::Icons => "icons",
-        TaskbarMode::Nerd => "nerd",
-    });
+    log::info!(
+        "Taskbar initialized (mode: {:?})",
+        match mode {
+            TaskbarMode::Text => "text",
+            TaskbarMode::Icons => "icons",
+            TaskbarMode::Nerd => "nerd",
+        }
+    );
 }
 
 fn update_taskbar(
@@ -136,14 +139,17 @@ fn update_taskbar(
             } else {
                 String::new()
             };
-            tb.widgets.insert(id, WidgetState {
-                widget: w,
-                cached_title: info.title.clone(),
-                cached_app_id: info.app_id.clone(),
-                cached_icon_name: icon_name,
-                cached_activated: info.is_activated,
-                cached_minimized: info.is_minimized,
-            });
+            tb.widgets.insert(
+                id,
+                WidgetState {
+                    widget: w,
+                    cached_title: info.title.clone(),
+                    cached_app_id: info.app_id.clone(),
+                    cached_icon_name: icon_name,
+                    cached_activated: info.is_activated,
+                    cached_minimized: info.is_minimized,
+                },
+            );
         }
     }
 }
@@ -232,13 +238,11 @@ fn create_widget(
 
             // Apply icon-derived color to the label (cached)
             let icon_name = resolve_icon_name(&info.app_id);
-            let color = color_cache
-                .entry(icon_name.clone())
-                .or_insert_with(|| {
-                    let c = extract_icon_color(&icon_name);
-                    log::info!("Icon color for '{}' ({}): {:?}", info.app_id, icon_name, c);
-                    c
-                });
+            let color = color_cache.entry(icon_name.clone()).or_insert_with(|| {
+                let c = extract_icon_color(&icon_name);
+                log::info!("Icon color for '{}' ({}): {:?}", info.app_id, icon_name, c);
+                c
+            });
             if let Some((r, g, b)) = *color {
                 apply_color_to_label(&label, r, g, b);
             }
@@ -305,8 +309,20 @@ fn resolve_icon_name(app_id: &str) -> String {
         s if s.contains("firefox") => "firefox",
         s if s.contains("chrome") || s.contains("chromium") => "chromium",
         s if s.contains("code") || s.contains("vscode") => "visual-studio-code",
-        s if s.contains("terminal") || s.contains("foot") || s.contains("kitty") || s.contains("alacritty") => "utilities-terminal",
-        s if s.contains("thunar") || s.contains("nautilus") || s.contains("dolphin") || s.contains("files") => "system-file-manager",
+        s if s.contains("terminal")
+            || s.contains("foot")
+            || s.contains("kitty")
+            || s.contains("alacritty") =>
+        {
+            "utilities-terminal"
+        }
+        s if s.contains("thunar")
+            || s.contains("nautilus")
+            || s.contains("dolphin")
+            || s.contains("files") =>
+        {
+            "system-file-manager"
+        }
         s if s.contains("discord") => "discord",
         s if s.contains("spotify") => "spotify",
         s if s.contains("telegram") => "telegram",
@@ -332,45 +348,52 @@ fn nerd_glyph_for(app_id: &str) -> String {
     let lower = app_id.to_lowercase();
     let glyph = match lower.as_str() {
         // Browsers
-        s if s.contains("firefox") => "\u{f269}",       // 
-        s if s.contains("chrome") => "\u{f268}",        // 
-        s if s.contains("chromium") => "\u{f268}",      // 
-        s if s.contains("brave") => "\u{f39f}",         // 
+        s if s.contains("firefox") => "\u{f269}",  //
+        s if s.contains("chrome") => "\u{f268}",   //
+        s if s.contains("chromium") => "\u{f268}", //
+        s if s.contains("brave") => "\u{f39f}",    //
         // Terminals
-        s if s.contains("foot") => "\u{f489}",          // 
-        s if s.contains("kitty") => "\u{f489}",         // 
-        s if s.contains("alacritty") => "\u{f489}",     // 
-        s if s.contains("terminal") => "\u{f489}",      // 
-        s if s.contains("wezterm") => "\u{f489}",       // 
-        s if s.contains("konsole") => "\u{f489}",       // 
+        s if s.contains("foot") => "\u{f489}",      //
+        s if s.contains("kitty") => "\u{f489}",     //
+        s if s.contains("alacritty") => "\u{f489}", //
+        s if s.contains("terminal") => "\u{f489}",  //
+        s if s.contains("wezterm") => "\u{f489}",   //
+        s if s.contains("konsole") => "\u{f489}",   //
         // Editors / IDEs
-        s if s.contains("code") || s.contains("vscode") => "\u{e70c}", // 
-        s if s.contains("neovim") || s.contains("nvim") => "\u{e62b}", // 
-        s if s.contains("vim") => "\u{e62b}",           // 
-        s if s.contains("emacs") => "\u{e632}",         // 
-        s if s.contains("sublime") => "\u{e7aa}",       // 
+        s if s.contains("code") || s.contains("vscode") => "\u{e70c}", //
+        s if s.contains("neovim") || s.contains("nvim") => "\u{e62b}", //
+        s if s.contains("vim") => "\u{e62b}",                          //
+        s if s.contains("emacs") => "\u{e632}",                        //
+        s if s.contains("sublime") => "\u{e7aa}",                      //
         // Files
-        s if s.contains("thunar") || s.contains("nautilus") || s.contains("dolphin") || s.contains("files") || s.contains("pcmanfm") => "\u{f413}", // 
+        s if s.contains("thunar")
+            || s.contains("nautilus")
+            || s.contains("dolphin")
+            || s.contains("files")
+            || s.contains("pcmanfm") =>
+        {
+            "\u{f413}"
+        } //
         // Media
-        s if s.contains("spotify") => "\u{f1bc}",       // 
-        s if s.contains("vlc") => "\u{f40a}",           // 
-        s if s.contains("mpv") => "\u{f40a}",           // 
+        s if s.contains("spotify") => "\u{f1bc}", //
+        s if s.contains("vlc") => "\u{f40a}",     //
+        s if s.contains("mpv") => "\u{f40a}",     //
         // Communication
-        s if s.contains("discord") => "\u{f392}",       // 
-        s if s.contains("telegram") => "\u{f2c6}",      // 
-        s if s.contains("slack") => "\u{f198}",         // 
-        s if s.contains("signal") => "\u{f086}",        // 
+        s if s.contains("discord") => "\u{f392}",  //
+        s if s.contains("telegram") => "\u{f2c6}", //
+        s if s.contains("slack") => "\u{f198}",    //
+        s if s.contains("signal") => "\u{f086}",   //
         // Games / Creative
-        s if s.contains("steam") => "\u{f1b6}",         // 
-        s if s.contains("gimp") => "\u{e69e}",          // 
-        s if s.contains("inkscape") => "\u{e69e}",      // 
-        s if s.contains("blender") => "\u{e69e}",       // 
-        s if s.contains("obs") => "\u{f03d}",           // 
+        s if s.contains("steam") => "\u{f1b6}",    //
+        s if s.contains("gimp") => "\u{e69e}",     //
+        s if s.contains("inkscape") => "\u{e69e}", //
+        s if s.contains("blender") => "\u{e69e}",  //
+        s if s.contains("obs") => "\u{f03d}",      //
         // System
-        s if s.contains("settings") || s.contains("control") => "\u{f013}", // 
-        s if s.contains("monitor") || s.contains("htop") || s.contains("btop") => "\u{f080}", // 
+        s if s.contains("settings") || s.contains("control") => "\u{f013}", //
+        s if s.contains("monitor") || s.contains("htop") || s.contains("btop") => "\u{f080}", //
         // Fallback
-        _ => "\u{f2d0}",                                // 
+        _ => "\u{f2d0}", //
     };
     glyph.to_string()
 }
@@ -469,8 +492,7 @@ fn apply_color_to_label(label: &gtk4::Label, r: f64, g: f64, b: f64) {
     );
     let provider = gtk4::CssProvider::new();
     provider.load_from_data(&css);
-    label.style_context().add_provider(
-        &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_USER + 2,
-    );
+    label
+        .style_context()
+        .add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_USER + 2);
 }
