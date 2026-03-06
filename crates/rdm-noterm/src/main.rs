@@ -90,6 +90,7 @@ struct UiState {
     paned: Paned,
     open_system_btn: Button,
     selected_path: Option<PathBuf>,
+    refresh_ls_widget: Option<gtk4::Widget>,
 }
 
 fn main() {
@@ -275,6 +276,7 @@ fn build_ui(app: &Application) {
         paned: paned.clone(),
         open_system_btn: open_system_btn.clone(),
         selected_path: None,
+        refresh_ls_widget: None,
     }));
 
     {
@@ -388,43 +390,66 @@ fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
     }
 
     let cwd = state.borrow().cwd.clone();
-    let output = Command::new("sh")
-        .arg("-lc")
-        .arg(cmd)
-        .current_dir(&cwd)
-        .output();
+    let mode = state.borrow().mode;
+    let (show_hidden, query) = {
+        let s = state.borrow();
+        (s.show_hidden, s.search_query.clone())
+    };
+    let cmd_owned = cmd.to_string();
+    let state_result = state.clone();
 
-    match output {
-        Ok(out) => {
-            let mut combined = String::new();
-            combined.push_str(&String::from_utf8_lossy(&out.stdout));
-            combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    gtk4::glib::spawn_future_local(async move {
+        let (tx, rx) = async_channel::bounded::<Result<std::process::Output, String>>(1);
+        let cmd_thread = cmd_owned.clone();
+        let cwd_thread = cwd.clone();
+        std::thread::spawn(move || {
+            let res = Command::new("sh")
+                .arg("-lc")
+                .arg(&cmd_thread)
+                .current_dir(&cwd_thread)
+                .output()
+                .map_err(|e| e.to_string());
+            let _ = tx.send_blocking(res);
+        });
 
-            let mode = state.borrow().mode;
-            if mode != RenderMode::Raw && cmd.starts_with("ls") && out.status.success() {
-                let (show_hidden, query) = {
-                    let s = state.borrow();
-                    (s.show_hidden, s.search_query.clone())
-                };
-                let entries = build_ls_entries_from_fs(&cwd, cmd, show_hidden, &query);
-                if entries.is_empty() {
-                    let parsed = parse_ls_entries(&combined, &cwd);
-                    if parsed.is_empty() {
-                        append_block_text(state, &combined);
+        let output = match rx.recv().await {
+            Ok(v) => v,
+            Err(_) => {
+                append_block_text(&state_result, "Failed to receive command output\n");
+                return;
+            }
+        };
+
+        match output {
+            Ok(out) => {
+                let mut combined = String::new();
+                combined.push_str(&String::from_utf8_lossy(&out.stdout));
+                combined.push_str(&String::from_utf8_lossy(&out.stderr));
+
+                if mode != RenderMode::Raw && cmd_owned.starts_with("ls") && out.status.success() {
+                    let entries = build_ls_entries_from_fs(&cwd, &cmd_owned, show_hidden, &query);
+                    if entries.is_empty() {
+                        let parsed = parse_ls_entries(&combined, &cwd);
+                        if parsed.is_empty() {
+                            append_block_text(&state_result, &combined);
+                        } else {
+                            append_ls_block(&state_result, parsed);
+                        }
                     } else {
-                        append_ls_block(state, parsed);
+                        append_ls_block(&state_result, entries);
                     }
                 } else {
-                    append_ls_block(state, entries);
+                    append_block_text(&state_result, &combined);
                 }
-            } else {
-                append_block_text(state, &combined);
+            }
+            Err(e) => {
+                append_block_text(
+                    &state_result,
+                    &format!("Failed to execute command: {}\n", e),
+                );
             }
         }
-        Err(e) => {
-            append_block_text(state, &format!("Failed to execute command: {}\n", e));
-        }
-    }
+    });
 }
 
 fn append_block_label(state: &Rc<RefCell<UiState>>, text: &str, class_name: &str) {
@@ -445,6 +470,11 @@ fn append_block_text(state: &Rc<RefCell<UiState>>, text: &str) {
 }
 
 fn append_ls_block(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) {
+    let flow = build_ls_flow(state, entries);
+    state.borrow().output_box.append(&flow);
+}
+
+fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::FlowBox {
     let flow = gtk4::FlowBox::new();
     flow.add_css_class("noterm-list");
     flow.set_selection_mode(gtk4::SelectionMode::None);
@@ -508,11 +538,62 @@ fn append_ls_block(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) {
 
         flow.insert(&tile_btn, -1);
     }
-    state.borrow().output_box.append(&flow);
+    flow
 }
 
 fn refresh_ls_view(state: &Rc<RefCell<UiState>>) {
-    run_command(state, "ls");
+    let (cwd, mode, show_hidden, query) = {
+        let s = state.borrow();
+        (s.cwd.clone(), s.mode, s.show_hidden, s.search_query.clone())
+    };
+
+    let replacement: gtk4::Widget = if mode == RenderMode::Raw {
+        let text = build_raw_ls_text(&cwd, show_hidden, &query);
+        let view = TextView::new();
+        view.set_editable(false);
+        view.set_cursor_visible(false);
+        view.set_monospace(true);
+        view.add_css_class("noterm-output");
+        view.buffer().set_text(&text);
+        view.upcast()
+    } else {
+        let entries = build_ls_entries_from_fs(&cwd, "ls", show_hidden, &query);
+        build_ls_flow(state, entries).upcast()
+    };
+
+    replace_refresh_ls_widget(state, replacement);
+}
+
+fn replace_refresh_ls_widget(state: &Rc<RefCell<UiState>>, widget: gtk4::Widget) {
+    let mut s = state.borrow_mut();
+    if let Some(prev) = s.refresh_ls_widget.take() {
+        s.output_box.remove(&prev);
+    }
+    s.output_box.append(&widget);
+    s.refresh_ls_widget = Some(widget);
+}
+
+fn build_raw_ls_text(cwd: &Path, show_hidden: bool, query: &str) -> String {
+    let mut names = Vec::new();
+    let q = query.trim().to_lowercase();
+    if let Ok(rd) = std::fs::read_dir(cwd) {
+        for item in rd.flatten() {
+            let name = item.file_name().to_string_lossy().to_string();
+            if !show_hidden && name.starts_with('.') {
+                continue;
+            }
+            if !q.is_empty() && !name.to_lowercase().contains(&q) {
+                continue;
+            }
+            names.push(name);
+        }
+    }
+    names.sort_by_key(|n| n.to_lowercase());
+    if names.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", names.join("\n"))
+    }
 }
 
 fn build_places_sidebar() -> (GtkBox, Vec<(Button, PathBuf)>) {

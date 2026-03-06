@@ -13,3 +13,4 @@ log = { workspace = true }
 env_logger = { workspace = true }
 rdm-common = { workspace = true }
 dirs = { workspace = true }
+async-channel = { workspace = true }

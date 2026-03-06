@@ -1119,6 +1119,7 @@ dependencies = [
 name = "rdm-noterm"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "dirs",
  "env_logger",
  "gtk4",
