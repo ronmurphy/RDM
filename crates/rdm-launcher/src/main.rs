@@ -150,15 +150,29 @@ fn build_menu_content(
     let root = gtk4::Box::new(Orientation::Vertical, 0);
     root.add_css_class("menu-root");
 
-    // Search bar
+    // Top bar: settings button + search entry
+    let top_bar = gtk4::Box::new(Orientation::Horizontal, 6);
+    top_bar.set_margin_top(12);
+    top_bar.set_margin_bottom(8);
+    top_bar.set_margin_start(12);
+    top_bar.set_margin_end(12);
+
+    let settings_btn = gtk4::Button::new();
+    settings_btn.set_icon_name("preferences-system-symbolic");
+    settings_btn.set_tooltip_text(Some("RDM Settings"));
+    settings_btn.add_css_class("menu-settings-btn");
+    settings_btn.set_valign(gtk4::Align::Center);
+    settings_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("rdm-settings").spawn();
+    });
+    top_bar.append(&settings_btn);
+
     let search_entry = gtk4::Entry::new();
     search_entry.set_placeholder_text(Some("Search applications..."));
     search_entry.add_css_class("menu-search");
-    search_entry.set_margin_top(12);
-    search_entry.set_margin_bottom(8);
-    search_entry.set_margin_start(12);
-    search_entry.set_margin_end(12);
-    root.append(&search_entry);
+    search_entry.set_hexpand(true);
+    top_bar.append(&search_entry);
+    root.append(&top_bar);
 
     // Main split: left (categories + app list) | right (favorites)
     let split = gtk4::Box::new(Orientation::Horizontal, 0);

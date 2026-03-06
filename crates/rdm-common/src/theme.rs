@@ -205,3 +205,97 @@ fn assemble_theme(theme_name: &str) -> Option<String> {
 fn try_read(dir: &std::path::Path, filename: &str) -> Option<String> {
     std::fs::read_to_string(dir.join(filename)).ok()
 }
+
+// ─── Theme Editor helpers ────────────────────────────────────────
+
+/// A single `@define-color name #hex;` entry parsed from colors.css.
+#[derive(Debug, Clone)]
+pub struct ThemeColor {
+    pub var_name: String,
+    pub value: String, // hex string, e.g. "#1a1b26"
+}
+
+/// Load the color palette for a given theme name.
+///
+/// Returns parsed `@define-color` entries from colors.css.
+/// Tries user dir first, then built-in.
+pub fn load_theme_colors(theme_name: &str) -> Vec<ThemeColor> {
+    let user_dir = config::config_dir().join("themes").join(theme_name);
+    let css = try_read(&user_dir, "colors.css")
+        .or_else(|| builtin::get(theme_name).map(|f| f.colors.to_string()))
+        .unwrap_or_default();
+    parse_colors_css(&css)
+}
+
+/// Parse `@define-color` lines from raw CSS text.
+fn parse_colors_css(css: &str) -> Vec<ThemeColor> {
+    let mut colors = Vec::new();
+    for line in css.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("@define-color ") {
+            // Format: "name value;"
+            let rest = rest.trim_end_matches(';').trim();
+            if let Some(idx) = rest.find(char::is_whitespace) {
+                let var_name = rest[..idx].to_string();
+                let value = rest[idx..].trim().to_string();
+                // Only include concrete hex colors (skip @references)
+                if value.starts_with('#') {
+                    colors.push(ThemeColor { var_name, value });
+                }
+            }
+        }
+    }
+    colors
+}
+
+/// Generate colors.css content from a list of ThemeColor entries.
+pub fn serialize_colors_css(colors: &[ThemeColor], comment: &str) -> String {
+    let mut out = format!("/* {} */\n", comment);
+    for c in colors {
+        out.push_str(&format!("@define-color {} {};\n", c.var_name, c.value));
+    }
+    out
+}
+
+/// Save a user theme to `~/.config/rdm/themes/<slug>/`.
+///
+/// Creates the directory, writes theme.toml and colors.css.
+/// The theme will use the shared style.css and empty overrides.
+pub fn save_user_theme(
+    slug: &str,
+    display_name: &str,
+    colors: &[ThemeColor],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = config::config_dir().join("themes").join(slug);
+    std::fs::create_dir_all(&dir)?;
+
+    // theme.toml
+    let meta = ThemeMeta {
+        name: slug.to_string(),
+        display_name: display_name.to_string(),
+        author: "User".to_string(),
+        description: format!("Custom theme based on user edits"),
+    };
+    let toml_str = toml::to_string_pretty(&meta)?;
+    std::fs::write(dir.join("theme.toml"), toml_str)?;
+
+    // colors.css
+    let css = serialize_colors_css(colors, &format!("{} — Color Palette", display_name));
+    std::fs::write(dir.join("colors.css"), css)?;
+
+    // overrides.css (empty if doesn't exist)
+    let overrides_path = dir.join("overrides.css");
+    if !overrides_path.exists() {
+        std::fs::write(&overrides_path, "/* Custom overrides */\n")?;
+    }
+
+    Ok(())
+}
+
+/// Get theme names as slugs (for the base-theme selector).
+pub fn list_theme_slugs() -> Vec<(String, String)> {
+    list_themes()
+        .into_iter()
+        .map(|t| (t.name, t.display_name))
+        .collect()
+}

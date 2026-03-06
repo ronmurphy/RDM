@@ -34,7 +34,7 @@ RDM (Rust Desktop Manager) is a Wayland desktop environment that runs on top of 
 
 All GUI components use **GTK4** with **gtk4-layer-shell** to create shell surfaces (panels, overlays, desktop widgets). The taskbar uses the **wlr-foreign-toplevel-management** Wayland protocol directly via `wayland-client` to track open windows.
 
-The color theme is **Tokyo Night** throughout, with CSS hardcoded in each component's `load_css()` function.
+The color theme uses a **3-layer CSS architecture** (colors → shared style → overrides) supporting 9 built-in themes and user-created themes via a visual theme editor.
 
 ---
 
@@ -168,13 +168,13 @@ window.auto_exclusive_zone_enable();       // reserves space
 - Three display modes controlled by `TaskbarMode`:
   - `Text` — `gtk4::Button` with window title
   - `Icons` — `gtk4::Button` with a `gtk4::Image` from the icon theme (`resolve_icon_name()` maps app_id to theme icons with fallbacks)
-  - `Nerd` — `gtk4::Button` with a Nerd Font glyph label (`nerd_glyph_for()` maps app_id to Unicode glyphs)
+  - `Nerd` — `gtk4::Label` with a Nerd Font glyph (`nerd_glyph_for()` maps app_id to Unicode glyphs). Each label gets icon-derived coloring extracted from the app's icon via `extract_icon_color()` (dominant-color pixbuf sampling), applied as inline CSS at priority 802. Colors are cached in a `ColorCache` HashMap.
 
 **Action channel:** A `std::sync::mpsc` channel allows the GTK thread to send `ToplevelAction::Activate(id)` or `Close(id)` back to the Wayland thread, which calls the corresponding protocol methods.
 
 ### Clock (clock.rs)
 
-Simple `glib::timeout_add_seconds_local(1, ...)` that formats the current time with `chrono` and updates a GTK Label. Format string comes from config (default: `"%H:%M  %b %d"`).
+A `gtk4::MenuButton` with a popover containing a date header and `gtk4::Calendar` widget. The button label updates every second via `glib::timeout_add_seconds_local(1, ...)` using `chrono` with a configurable format string (default: `"%H:%M  %b %d"`). Clicking the clock opens the calendar popup. Styled with the `.tray-btn` class to match the system tray.
 
 ### System Tray (tray.rs)
 
@@ -204,7 +204,7 @@ The button label shows the battery icon + percentage (e.g., "󰂁 85%").
 
 An overlay layer-shell surface (`Layer::Overlay`) with exclusive keyboard grab. Contains:
 
-- Search entry at the top
+- Top bar with a dedicated **Settings button** (gear icon, launches `rdm-settings`) and search entry
 - Scrolled list of `.desktop` file entries (loaded via `freedesktop-desktop-entry` crate)
 - Filters in real-time as you type
 - Enter activates the selected entry; Escape closes
@@ -263,7 +263,11 @@ A tiny layer-shell surface on `Layer::Bottom` (above wallpaper, below all window
 **Path:** `crates/rdm-settings/`
 **Binary:** `rdm-settings`
 
-A regular GTK4 window (not layer-shell) with a `Stack` + `StackSidebar` layout. Two pages:
+A regular GTK4 window (not layer-shell) with a `Stack` + `StackSidebar` layout. Five pages:
+
+### Appearance Page
+- Theme selector dropdown (lists all built-in + user themes)
+- Description display for the selected theme
 
 ### Panel Page
 - Taskbar Mode dropdown (icons / text / nerd)
@@ -271,11 +275,25 @@ A regular GTK4 window (not layer-shell) with a `Stack` + `StackSidebar` layout. 
 - Panel Height spin button (24–64)
 - Show Clock toggle
 - Clock Format text entry
+- Launcher Position dropdown (center / panel / full)
 
 ### Wallpaper Page
 - Image path display + Browse button (`FileChooserNative`) + Clear button
 - Mode dropdown (fill / center / stretch / fit / tile)
 - Background Color text entry (hex)
+
+### Displays Page
+- Interactive drag-and-drop display arrangement canvas (Cairo-rendered)
+- Per-monitor controls: resolution, refresh rate, position, enable/disable
+- Applies configuration via `wlr-randr`
+
+### Theme Editor Page
+- Base Theme dropdown to pick a starting palette
+- Theme Name entry (auto-fills `<base>-custom`)
+- Scrollable color swatch grid showing all `@define-color` variables
+- Click any swatch to open a GTK4 `ColorDialog` color picker
+- Save button writes to `~/.config/rdm/themes/<slug>/` (theme.toml + colors.css + overrides.css)
+- Saved themes instantly appear in the Appearance theme selector
 
 ### Apply Flow
 1. User clicks "Apply"
@@ -327,23 +345,60 @@ Developer edits code
 
 ## Theming
 
-All components use the **Tokyo Night** color palette, applied via GTK4 `CssProvider::load_from_data()` in each binary's `load_css()` function.
+RDM uses a **3-layer CSS architecture** for theming, managed by `rdm-common/src/theme.rs`:
 
-Key colors:
-| Token | Hex | Usage |
-|-------|-----|-------|
-| Background | `#1a1b26` | Panel, launcher, popover backgrounds |
-| Foreground | `#c0caf5` | Primary text |
-| Subtle | `#a9b1d6` | Clock, secondary text |
-| Comment | `#565f89` | App descriptions, hints |
-| Selection | `#292e42` | Hover states |
-| Blue | `#7aa2f7` | Launcher button, titles, accents |
-| Dark blue | `#3d59a1` | Active taskbar item |
-| Border | `#3b4261` | Separators, input borders |
-| Green | `#9ece6a` | Battery normal |
-| Yellow | `#e0af68` | Battery low |
-| Red | `#f7768e` | Battery critical, errors |
-| Cyan | `#7dcfff` | Battery charging |
+### CSS Cascade Order
+
+1. **`colors.css`** — `@define-color` palette (~18 variables per theme)
+2. **`style.css`** — Shared structural CSS (~460 lines, one copy for all themes)
+3. **`overrides.css`** — Per-theme tweaks (border radius, light/dark panel, etc.)
+
+The assembled CSS is loaded at **priority 801** (`STYLE_PROVIDER_PRIORITY_USER + 1`) in all 5 GUI crates, which beats the user's `~/.config/gtk-4.0/gtk.css` (loaded at 800 by GTK). Per-widget icon colors use priority 802.
+
+### Built-in Themes (9)
+
+| Theme | Style | Notes |
+|-------|-------|-------|
+| Tokyo Night | Dark | Default — blue/purple accents |
+| Ubuntu | Dark | Orange/aubergine accents |
+| Windows 11 | Dark | Blue accents, hard-edge (0 radius) |
+| macOS | Light | Aqua accents, pill-shaped buttons |
+| Nord | Dark | Arctic blue palette |
+| Catppuccin Mocha | Dark | Mauve/lavender accents |
+| Gruvbox Dark | Dark | Warm orange/yellow palette |
+| Dracula | Dark | Purple/pink accents |
+| Solarized Dark | Dark | Blue/cyan palette |
+
+### Theme Color Variables
+
+| Variable | Purpose |
+|----------|--------|
+| `theme_bg` | Primary background |
+| `theme_fg` | Primary foreground/text |
+| `theme_surface` | Elevated surface background |
+| `theme_border` | Borders and separators |
+| `theme_active` | Active/focused state |
+| `theme_accent` | Primary accent color |
+| `theme_accent_hover` | Hover accent variant |
+| `theme_deep_bg` | Deepest background (tray, popovers) |
+| `theme_muted` | Muted/secondary text |
+| `theme_subtle` | Subtle text |
+| `theme_green/yellow/red/cyan/purple` | Semantic colors |
+| `theme_suggested_fg` | Foreground on suggested-action buttons |
+| `theme_contrast_fg` | High-contrast foreground (e.g., white) |
+
+### User Themes
+
+Custom themes are stored in `~/.config/rdm/themes/<name>/` with:
+- `theme.toml` — name, display_name, author, description
+- `colors.css` — `@define-color` palette
+- `overrides.css` — optional per-theme CSS tweaks
+
+User themes override built-in themes if they share the same slug name. The **Theme Editor** in rdm-settings provides a visual GUI for creating themes.
+
+### Nerd Icon Colors
+
+In Nerd taskbar mode, each app's icon color is extracted from its GTK icon theme icon using a dominant-color algorithm (pixbuf sampling). The extracted color is applied as inline CSS to the Label widget at priority 802, producing colored Nerd Font glyphs that match each application's branding. A `ColorCache` prevents redundant pixbuf lookups.
 
 Font stack: `"Inter", "Noto Sans", sans-serif` for UI; `"JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace` for Nerd icons and taskbar nerd mode.
 
@@ -353,7 +408,7 @@ Font stack: `"Inter", "Noto Sans", sans-serif` for UI; `"JetBrainsMono Nerd Font
 
 | Library | Version | Used For |
 |---------|---------|----------|
-| `gtk4` | 0.9 | All GUI (uses GTK 4.x C library) |
+| `gtk4` | 0.9 (v4_10 feature) | All GUI (uses GTK 4.x C library, ColorDialog for theme editor) |
 | `gtk4-layer-shell` | 0.4 | Wayland layer-shell surfaces (panels, overlays) |
 | `wayland-client` | 0.31 | Direct Wayland protocol communication |
 | `wayland-protocols-wlr` | 0.3 | wlr-foreign-toplevel-management protocol |
@@ -381,7 +436,7 @@ RDM connects to this protocol in a **separate thread** from GTK, using its own `
 
 1. **`event_created_child!` macro is required** for wayland-client 0.31 when the compositor creates new objects via `new_id` events. Without it, the client panics. This must be defined for `ZwlrForeignToplevelManagerV1` dispatching to `ZwlrForeignToplevelHandleV1`.
 
-2. **gtk4 0.9 API differences** — Uses `CssProvider::load_from_data()` (not `load_from_string()` which is GTK 4.12+). Uses `FileChooserNative` instead of `FileDialog` (which requires GTK 4.10+/gtk4-rs 0.8+).
+2. **gtk4 0.9 with `v4_10` feature** — Enables `ColorDialog` for the theme editor. `FileChooserNative` is still used in wallpaper settings (deprecated in 4.10 but functional). CSS loaded via `CssProvider::load_from_data()`.
 
 3. **Session manager changes require re-login** — `rdm-session` is the parent of all other processes. Hot reload restarts its children, not itself.
 
@@ -399,7 +454,7 @@ RDM connects to this protocol in a **separate thread** from GTK, using its own `
 - [ ] Visual snap zone preview overlays
 - [ ] Workspace indicator widget in panel
 - [ ] Multi-monitor support in settings
-- [ ] Configurable theme / user CSS override
+- [x] Configurable theme / user CSS override (3-layer theme system + theme editor)
 - [ ] Taskbar pinned apps
 - [ ] Screen recording integration
 - [ ] Auto-detect battery path (iterate `/sys/class/power_supply/`)

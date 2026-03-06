@@ -1,6 +1,6 @@
 # RDM — Rust Desktop Manager
 
-A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, and session management — all with a cohesive **Tokyo Night** color theme.
+A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, and session management — with **9 built-in color themes** and a visual theme editor for creating your own.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Rust](https://img.shields.io/badge/rust-2021_edition-orange)
@@ -17,17 +17,17 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 
 ## What It Does
 
-- **Panel/Taskbar** — Top (or bottom) bar with app launcher button, running-window taskbar, clock, and system tray. Three taskbar modes:
+- **Panel/Taskbar** — Top (or bottom) bar with app launcher button, running-window taskbar, clock with calendar popup, and system tray. Three taskbar modes:
   - **Icons** — GTK icon theme icons for each open window
-  - **Nerd** — Nerd Font glyphs (terminal, browser, editor, etc.)
+  - **Nerd** — Nerd Font glyphs with icon-derived colors extracted from each app's icon
   - **Text** — Window title buttons (classic style)
-- **App Launcher** — Overlay search dialog (Super key) that scans `.desktop` files and launches apps
+- **App Launcher** — Overlay search dialog (Super key) that scans `.desktop` files and launches apps. Includes a dedicated Settings button for quick access to RDM Settings
 - **System Tray** — Unified menu button combining:
   - Battery indicator with charge level, Nerd Font icons, and color coding
   - WiFi submenu — scans networks via NetworkManager, connect to known/new networks with password dialog
   - Session controls — Lock, Logout, Reboot, Shutdown
 - **Wallpaper** — Managed via `swaybg`, configurable through the settings app (image path, fill mode, solid color fallback)
-- **Settings App** — GTK4 GUI to configure panel options (taskbar mode, position, height, clock) and wallpaper (image, mode, background color). Changes apply via hot reload.
+- **Settings App** — GTK4 GUI to configure panel options (taskbar mode, position, height, clock), wallpaper (image, mode, background color), display arrangement, and a **Theme Editor** for creating custom color themes. Changes apply via hot reload.
 - **Hot Reload** — Rebuild any component, run `rdm-reload`, and see changes instantly without restarting the compositor or losing your windows
 - **Session Manager** — Manages autostart processes, automatic crash recovery, PID tracking, SIGUSR1-driven hot reload
 - **Version Watermark** — Subtle build version label on the desktop (layer-shell bottom)
@@ -42,7 +42,6 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 - Visual snap zone previews (quarter/thirds tiling overlays)
 - Multi-monitor configuration UI
 - Workspace indicator / switcher widget in the panel
-- Theming beyond Tokyo Night (colors are currently hardcoded in CSS)
 - Application pinning in the taskbar
 - Drag-and-drop window reordering
 - Screen recording
@@ -59,10 +58,10 @@ RDM is a Cargo workspace with 8 crates:
 | `rdm-panel` | `rdm-panel` | Panel bar — taskbar, clock, system tray (battery, wifi, power), launcher button |
 | `rdm-launcher` | `rdm-launcher` | Overlay app launcher — searches `.desktop` files, keyboard-driven |
 | `rdm-notify` | `rdm-notify` | Notification daemon — freedesktop D-Bus notifications with GTK4 layer-shell popups |
-| `rdm-settings` | `rdm-settings` | GTK4 settings GUI — panel config + wallpaper config |
+| `rdm-settings` | `rdm-settings` | GTK4 settings GUI — panel, wallpaper, displays, and theme editor |
 | `rdm-watermark` | `rdm-watermark` | Version watermark on desktop background |
 | `rdm-snap` | `rdm-snap` | Snap daemon (stub — labwc handles snapping natively for now) |
-| `rdm-common` | *(library)* | Shared config types, load/save, build info, theming |
+| `rdm-common` | *(library)* | Shared config types, load/save, build info, 3-layer CSS theme system |
 
 ### Runtime Dependencies (not Rust crates)
 

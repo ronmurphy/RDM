@@ -4,6 +4,7 @@ use gtk4::{
     DropDown, Entry, Label, Orientation, Switch, StringList,
 };
 use rdm_common::config::RdmConfig;
+use rdm_common::theme::{ThemeColor, list_theme_slugs, load_theme_colors, save_user_theme};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -114,6 +115,10 @@ fn build_ui(app: &Application) {
     // --- Displays page ---
     let displays_page = build_displays_page(&config);
     stack.add_titled(&displays_page, Some("displays"), "Displays");
+
+    // --- Theme Editor page ---
+    let theme_editor_page = build_theme_editor_page(&window);
+    stack.add_titled(&theme_editor_page, Some("theme-editor"), "Theme Editor");
 
     // --- Main layout ---
     let main_box = GtkBox::new(Orientation::Vertical, 0);
@@ -492,6 +497,264 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
     page.append(&hint);
 
     page
+}
+
+// ─── Theme Editor ────────────────────────────────────────────────
+
+fn build_theme_editor_page(window: &ApplicationWindow) -> GtkBox {
+    let page = GtkBox::new(Orientation::Vertical, 12);
+    page.set_margin_top(20);
+    page.set_margin_bottom(20);
+    page.set_margin_start(20);
+    page.set_margin_end(20);
+
+    let header = Label::new(Some("Theme Editor"));
+    header.add_css_class("settings-header");
+    header.set_halign(gtk4::Align::Start);
+    page.append(&header);
+
+    let hint = Label::new(Some(
+        "Pick a base theme, tweak colors, then save as a new theme.",
+    ));
+    hint.add_css_class("settings-hint");
+    hint.set_halign(gtk4::Align::Start);
+    page.append(&hint);
+
+    // ── Base theme selector ──────────────────────────────────
+    let base_row = setting_row("Base Theme");
+    let slugs = list_theme_slugs();
+    let display_names: Vec<String> = slugs.iter().map(|(_, d)| d.clone()).collect();
+    let str_refs: Vec<&str> = display_names.iter().map(|s| s.as_str()).collect();
+    let slug_list = StringList::new(&str_refs);
+    let base_dropdown = DropDown::new(Some(slug_list), gtk4::Expression::NONE);
+    base_row.append(&base_dropdown);
+    page.append(&base_row);
+
+    // ── Theme name entry ─────────────────────────────────────
+    let name_row = setting_row("Theme Name");
+    let name_entry = Entry::new();
+    name_entry.set_placeholder_text(Some("my-custom-theme"));
+    name_entry.set_hexpand(true);
+    name_row.append(&name_entry);
+    page.append(&name_row);
+
+    // ── Scrollable color swatch grid ─────────────────────────
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_min_content_height(220);
+
+    let grid = gtk4::Grid::new();
+    grid.set_row_spacing(6);
+    grid.set_column_spacing(12);
+    grid.set_margin_top(8);
+    grid.set_margin_bottom(8);
+    grid.add_css_class("theme-editor-grid");
+    scroll.set_child(Some(&grid));
+    page.append(&scroll);
+
+    // Shared state: the editable vec of colors
+    let colors: Rc<RefCell<Vec<ThemeColor>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // ── Populate grid from chosen base theme ─────────────────
+    let colors_for_load = colors.clone();
+    let grid_for_load = grid.clone();
+    let name_for_load = name_entry.clone();
+    let slugs_for_load = slugs.clone();
+    let window_for_load = window.clone();
+
+    // Loads the selected theme's colors into the grid
+    let populate_grid = Rc::new(move |idx: u32| {
+        let Some((slug, _display)) = slugs_for_load.get(idx as usize) else {
+            return;
+        };
+        let loaded = load_theme_colors(slug);
+        // Default the new-theme name to "<base>-custom"
+        if name_for_load.text().is_empty() {
+            name_for_load.set_text(&format!("{}-custom", slug));
+        }
+
+        // Clear the grid
+        while let Some(child) = grid_for_load.first_child() {
+            grid_for_load.remove(&child);
+        }
+
+        // Column headers
+        let h1 = Label::new(Some("Variable"));
+        h1.add_css_class("settings-hint");
+        h1.set_halign(gtk4::Align::Start);
+        grid_for_load.attach(&h1, 0, 0, 1, 1);
+
+        let h2 = Label::new(Some("Color"));
+        h2.add_css_class("settings-hint");
+        h2.set_halign(gtk4::Align::Start);
+        grid_for_load.attach(&h2, 1, 0, 1, 1);
+
+        let h3 = Label::new(Some("Hex"));
+        h3.add_css_class("settings-hint");
+        h3.set_halign(gtk4::Align::Start);
+        grid_for_load.attach(&h3, 2, 0, 1, 1);
+
+        // One row per color
+        for (i, color) in loaded.iter().enumerate() {
+            let row = (i + 1) as i32;
+
+            // Variable name label
+            let name_label = Label::new(Some(&color.var_name));
+            name_label.set_halign(gtk4::Align::Start);
+            name_label.set_width_chars(20);
+            grid_for_load.attach(&name_label, 0, row, 1, 1);
+
+            // Color swatch button (clickable)
+            let swatch = Button::new();
+            swatch.set_size_request(36, 24);
+            swatch.add_css_class("theme-swatch");
+            apply_swatch_color(&swatch, &color.value);
+
+            // Hex value label
+            let hex_label = Label::new(Some(&color.value));
+            hex_label.set_halign(gtk4::Align::Start);
+            hex_label.set_selectable(true);
+
+            // Click swatch → open color dialog
+            let colors_ref = colors_for_load.clone();
+            let swatch_clone = swatch.clone();
+            let hex_label_clone = hex_label.clone();
+            let win = window_for_load.clone();
+            let color_index = i;
+            swatch.connect_clicked(move |_| {
+                open_color_picker(
+                    &win,
+                    &colors_ref,
+                    color_index,
+                    &swatch_clone,
+                    &hex_label_clone,
+                );
+            });
+
+            grid_for_load.attach(&swatch, 1, row, 1, 1);
+            grid_for_load.attach(&hex_label, 2, row, 1, 1);
+        }
+
+        *colors_for_load.borrow_mut() = loaded;
+    });
+
+    // Load the first theme immediately
+    let populate_initial = populate_grid.clone();
+    populate_initial(0);
+
+    // Reload when dropdown changes
+    base_dropdown.connect_selected_notify(move |dd| {
+        populate_grid(dd.selected());
+    });
+
+    // ── Save button ──────────────────────────────────────────
+    let save_row = GtkBox::new(Orientation::Horizontal, 8);
+    save_row.set_halign(gtk4::Align::End);
+    save_row.set_margin_top(8);
+
+    let save_btn = Button::with_label("Save Theme");
+    save_btn.add_css_class("suggested-action");
+
+    let status_label = Label::new(None);
+    status_label.set_halign(gtk4::Align::Start);
+    status_label.set_hexpand(true);
+
+    let colors_for_save = colors.clone();
+    let name_for_save = name_entry.clone();
+    let status = status_label.clone();
+    save_btn.connect_clicked(move |_| {
+        let raw_name = name_for_save.text().to_string();
+        let slug = raw_name
+            .trim()
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric() && c != '-', "-");
+        if slug.is_empty() {
+            status.set_text("Enter a theme name first.");
+            status.add_css_class("settings-hint");
+            return;
+        }
+        let display_name = raw_name.trim().to_string();
+        let current_colors = colors_for_save.borrow().clone();
+        match save_user_theme(&slug, &display_name, &current_colors) {
+            Ok(()) => {
+                status.set_text(&format!("Saved to ~/.config/rdm/themes/{}/", slug));
+                status.remove_css_class("error");
+                status.add_css_class("settings-hint");
+                log::info!("Theme saved: {}", slug);
+            }
+            Err(e) => {
+                status.set_text(&format!("Error: {}", e));
+                status.add_css_class("error");
+                log::error!("Failed to save theme: {}", e);
+            }
+        }
+    });
+
+    save_row.append(&status_label);
+    save_row.append(&save_btn);
+    page.append(&save_row);
+
+    page
+}
+
+/// Apply a hex color as inline CSS to a swatch button.
+#[allow(deprecated)]
+fn apply_swatch_color(btn: &Button, hex: &str) {
+    let css = format!(
+        "button.theme-swatch {{ background: {}; min-width: 36px; min-height: 24px; border-radius: 4px; border: 1px solid alpha(white, 0.2); }}",
+        hex
+    );
+    let provider = CssProvider::new();
+    provider.load_from_data(&css);
+    btn.style_context().add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_USER + 2);
+}
+
+/// Open a GTK4 ColorDialog, update the swatch and color vec on success.
+fn open_color_picker(
+    window: &ApplicationWindow,
+    colors: &Rc<RefCell<Vec<ThemeColor>>>,
+    index: usize,
+    swatch: &Button,
+    hex_label: &Label,
+) {
+    let dialog = gtk4::ColorDialog::new();
+    dialog.set_modal(true);
+    dialog.set_title("Pick Color");
+
+    // Pre-select the current color
+    let current_hex = {
+        let c = colors.borrow();
+        c.get(index).map(|tc| tc.value.clone()).unwrap_or_default()
+    };
+    let initial = gtk4::gdk::RGBA::parse(&current_hex).unwrap_or(gtk4::gdk::RGBA::BLACK);
+
+    let colors_ref = colors.clone();
+    let swatch = swatch.clone();
+    let hex_label = hex_label.clone();
+    dialog.choose_rgba(
+        Some(window),
+        Some(&initial),
+        gtk4::gio::Cancellable::NONE,
+        move |result: Result<gtk4::gdk::RGBA, gtk4::glib::Error>| {
+            if let Ok(rgba) = result {
+                let hex = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (rgba.red() * 255.0) as u8,
+                    (rgba.green() * 255.0) as u8,
+                    (rgba.blue() * 255.0) as u8,
+                );
+                // Update state
+                if let Some(tc) = colors_ref.borrow_mut().get_mut(index) {
+                    tc.value = hex.clone();
+                }
+                // Update UI
+                hex_label.set_text(&hex);
+                apply_swatch_color(&swatch, &hex);
+            }
+        },
+    );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
