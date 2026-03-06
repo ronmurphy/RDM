@@ -168,9 +168,67 @@ popover modelbutton:hover {
     font-size: 16px;
 }
 
-.clock {
-    padding: 4px 12px;
+.clock.tray-btn {
     color: @theme_subtle;
+}
+
+.calendar-popover contents {
+    background-color: @theme_bg;
+    color: @theme_fg;
+    border: 1px solid @theme_border;
+    border-radius: 12px;
+    padding: 4px;
+}
+
+.calendar-date {
+    font-size: 14px;
+    font-weight: bold;
+    color: @theme_accent;
+    padding: 4px 8px;
+}
+
+calendar {
+    background-color: transparent;
+    color: @theme_fg;
+    padding: 4px;
+}
+
+calendar > header {
+    color: @theme_fg;
+    padding: 2px 4px;
+}
+
+calendar > header > button {
+    color: @theme_accent;
+    background: transparent;
+    border: none;
+    min-height: 24px;
+}
+
+calendar > header > button:hover {
+    background-color: @theme_surface;
+    border-radius: 6px;
+}
+
+calendar label.day-number {
+    font-size: 12px;
+    padding: 4px;
+    border-radius: 50%;
+}
+
+calendar label.day-number:selected {
+    background-color: @theme_accent;
+    color: @theme_bg;
+}
+
+calendar label.day-name {
+    font-size: 10px;
+    font-weight: bold;
+    color: @theme_muted;
+}
+
+calendar label.other-month {
+    color: @theme_muted;
 }
 
 .tray-btn {

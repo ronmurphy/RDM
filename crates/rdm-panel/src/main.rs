@@ -5,7 +5,7 @@ mod tray;
 mod wifi;
 
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, CssProvider, Label, Orientation};
+use gtk4::{Application, ApplicationWindow, CssProvider, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use rdm_common::config::RdmConfig;
 use std::collections::HashMap;
@@ -132,12 +132,10 @@ fn build_panel_window(
     taskbar::setup_taskbar_with_shared(&taskbar_box, mode, shared_state, action_tx);
     hbox.append(&taskbar_box);
 
-    // Right: clock
+    // Right: clock (with calendar popover)
     if config.panel.show_clock {
-        let clock_label = Label::new(None);
-        clock_label.add_css_class("clock");
-        clock::setup_clock(&clock_label, &config.panel.clock_format);
-        hbox.append(&clock_label);
+        let clock_widget = clock::build_clock_widget(&config.panel.clock_format);
+        hbox.append(&clock_widget);
     }
 
     // Right: system tray (battery + power menu)
