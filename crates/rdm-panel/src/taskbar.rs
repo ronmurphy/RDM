@@ -50,6 +50,7 @@ struct WidgetState {
 struct TaskbarState {
     widgets: HashMap<u32, WidgetState>,
     last_generation: u64,
+    color_cache: HashMap<String, Option<(f64, f64, f64)>>,
 }
 
 /// Set up the taskbar: starts the Wayland toplevel tracker and polls it
@@ -70,6 +71,7 @@ pub fn setup_taskbar_with_shared(
     let state = Rc::new(RefCell::new(TaskbarState {
         widgets: HashMap::new(),
         last_generation: 0,
+        color_cache: HashMap::new(),
     }));
 
     let container = container.clone();
@@ -127,7 +129,7 @@ fn update_taskbar(
         if let Some(ws) = tb.widgets.get_mut(&id) {
             update_existing_widget(ws, info, mode);
         } else {
-            let w = create_widget(info, mode, id, action_tx);
+            let w = create_widget(info, mode, id, action_tx, &mut tb.color_cache);
             container.append(w.button());
             let icon_name = if mode == TaskbarMode::Icons {
                 resolve_icon_name(&info.app_id)
@@ -204,6 +206,7 @@ fn create_widget(
     mode: TaskbarMode,
     id: u32,
     action_tx: &Rc<std::sync::mpsc::Sender<ToplevelAction>>,
+    color_cache: &mut HashMap<String, Option<(f64, f64, f64)>>,
 ) -> TaskbarWidget {
     let w = match mode {
         TaskbarMode::Text => {
@@ -224,10 +227,28 @@ fn create_widget(
         }
         TaskbarMode::Nerd => {
             let glyph = nerd_glyph_for(&info.app_id);
-            let btn = gtk4::Button::with_label(&glyph);
+            let label = gtk4::Label::new(Some(&glyph));
+            label.add_css_class("nerd-icon");
+
+            // Apply icon-derived color to the label (cached)
+            let icon_name = resolve_icon_name(&info.app_id);
+            let color = color_cache
+                .entry(icon_name.clone())
+                .or_insert_with(|| {
+                    let c = extract_icon_color(&icon_name);
+                    log::info!("Icon color for '{}' ({}): {:?}", info.app_id, icon_name, c);
+                    c
+                });
+            if let Some((r, g, b)) = *color {
+                apply_color_to_label(&label, r, g, b);
+            }
+
+            let btn = gtk4::Button::new();
+            btn.set_child(Some(&label));
             btn.add_css_class("taskbar-item");
             btn.add_css_class("taskbar-nerd");
             btn.set_tooltip_text(Some(&info.title));
+
             TaskbarWidget::NerdButton(btn)
         }
     };
@@ -362,4 +383,94 @@ fn truncate_title(title: &str, max_len: usize) -> String {
         s.push('\u{2026}');
         s
     }
+}
+
+// ─── Icon color extraction ────────────────────────────────────────
+
+/// Extract the dominant saturated color from an app icon via the icon theme.
+fn extract_icon_color(icon_name: &str) -> Option<(f64, f64, f64)> {
+    let display = gtk4::gdk::Display::default()?;
+    let theme = gtk4::IconTheme::for_display(&display);
+
+    let paintable = theme.lookup_icon(
+        icon_name,
+        &[],
+        16,
+        1,
+        gtk4::TextDirection::None,
+        gtk4::IconLookupFlags::empty(),
+    );
+
+    let file = paintable.file()?;
+    let path = file.path()?;
+
+    let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(&path, 16, 16, true).ok()?;
+
+    let pixels = pixbuf.pixel_bytes()?;
+    let data = pixels.as_ref();
+    let n_channels = pixbuf.n_channels() as usize;
+    let has_alpha = pixbuf.has_alpha();
+
+    let mut best_sat = 0.0f64;
+    let mut best_color = None;
+
+    let stride = n_channels;
+    let mut i = 0;
+    while i + stride <= data.len() {
+        let r = data[i] as f64 / 255.0;
+        let g = data[i + 1] as f64 / 255.0;
+        let b = data[i + 2] as f64 / 255.0;
+
+        // Skip transparent pixels
+        if has_alpha && n_channels >= 4 && data[i + 3] < 128 {
+            i += stride;
+            continue;
+        }
+
+        // Skip very dark or very light pixels
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let lightness = (max + min) / 2.0;
+        if lightness < 0.1 || lightness > 0.9 {
+            i += stride;
+            continue;
+        }
+
+        // Compute saturation (HSL)
+        let delta = max - min;
+        let sat = if delta < 0.001 {
+            0.0
+        } else {
+            delta / (1.0 - (2.0 * lightness - 1.0).abs())
+        };
+
+        if sat > best_sat {
+            best_sat = sat;
+            best_color = Some((r, g, b));
+        }
+
+        i += stride;
+    }
+
+    if best_sat > 0.1 {
+        best_color
+    } else {
+        None
+    }
+}
+
+/// Apply an RGB color to a label via an inline CSS provider.
+fn apply_color_to_label(label: &gtk4::Label, r: f64, g: f64, b: f64) {
+    let css = format!(
+        "* {{ color: rgb({},{},{}); }}",
+        (r * 255.0) as u8,
+        (g * 255.0) as u8,
+        (b * 255.0) as u8,
+    );
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_data(&css);
+    label.style_context().add_provider(
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER + 2,
+    );
 }

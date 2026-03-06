@@ -58,9 +58,9 @@ popover contents        { border-radius: 2px; }
     border-radius: 0;
 }
 
-/* Nerd-font icons: white on black bar */
+/* Nerd-font icons: color comes from icon extraction */
 .taskbar-nerd {
-    color: @win_panel_fg;
+    /* color set per-widget by icon extraction */
 }
 
 /* ── Clock & Tray — white text on black bar ────────────────────── */

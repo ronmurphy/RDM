@@ -56,9 +56,9 @@ popover contents        { border-radius: 12px; }
     border-radius: 8px;
 }
 
-/* Nerd-font icons: dark on light bar */
+/* Nerd-font icons: color comes from icon extraction */
 .taskbar-nerd {
-    color: @macos_panel_fg;
+    /* color set per-widget by icon extraction */
 }
 
 /* ── Clock & Tray — dark text on light bar ─────────────────────── */

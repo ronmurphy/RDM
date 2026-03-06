@@ -725,7 +725,7 @@ fn apply_icon_color(label: &Label, icon_name: &str, cache: &ColorCache) {
         provider.load_from_data(&format!("* {{ {} }}", css));
         label.style_context().add_provider(
             &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_USER,
+            gtk4::STYLE_PROVIDER_PRIORITY_USER + 2,
         );
     }
 }
