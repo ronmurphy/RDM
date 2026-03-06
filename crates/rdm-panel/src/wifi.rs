@@ -1,5 +1,6 @@
 use crate::taskbar::TaskbarMode;
 use gtk4::prelude::*;
+use std::cell::RefCell;
 use std::process::Command;
 
 /// A scanned WiFi network
@@ -9,6 +10,10 @@ pub struct WifiNetwork {
     pub signal: u8,
     pub security: String,
     pub in_use: bool,
+}
+
+thread_local! {
+    static WIFI_MENUS: RefCell<Vec<gtk4::glib::WeakRef<gtk4::gio::Menu>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Scan available WiFi networks via nmcli
@@ -122,10 +127,108 @@ fn wifi_signal_icon(signal: u8, in_use: bool) -> &'static str {
     }
 }
 
+fn refresh_label(mode: TaskbarMode) -> String {
+    match mode {
+        TaskbarMode::Nerd => "\u{f0450}  Rescan".to_string(), // 󰑐
+        TaskbarMode::Icons => "\u{1f504}  Rescan".to_string(), // 🔄
+        TaskbarMode::Text => "Rescan".to_string(),
+    }
+}
+
+fn scanning_label(mode: TaskbarMode) -> String {
+    match mode {
+        TaskbarMode::Nerd => "\u{f0210}  Scanning...".to_string(), // 󰈐
+        TaskbarMode::Icons => "\u{1f50d}  Scanning...".to_string(), // 🔍
+        TaskbarMode::Text => "Scanning...".to_string(),
+    }
+}
+
+fn register_wifi_menu(menu: &gtk4::gio::Menu) {
+    WIFI_MENUS.with(|menus| {
+        let mut menus = menus.borrow_mut();
+        menus.retain(|weak| weak.upgrade().is_some());
+        let weak = gtk4::glib::WeakRef::new();
+        weak.set(Some(menu));
+        menus.push(weak);
+    });
+}
+
+fn refresh_all_wifi_menus(mode: TaskbarMode) {
+    WIFI_MENUS.with(|menus| {
+        let mut menus = menus.borrow_mut();
+        menus.retain(|weak| {
+            if let Some(menu) = weak.upgrade() {
+                populate_wifi_menu(&menu, mode);
+                true
+            } else {
+                false
+            }
+        });
+    });
+}
+
+fn render_wifi_menu_loading(menu: &gtk4::gio::Menu, mode: TaskbarMode) {
+    menu.remove_all();
+
+    let rescan_section = gtk4::gio::Menu::new();
+    rescan_section.append(Some(&refresh_label(mode)), Some("app.wifi-refresh"));
+    menu.append_section(None, &rescan_section);
+
+    let status_section = gtk4::gio::Menu::new();
+    status_section.append(Some(&scanning_label(mode)), None);
+    menu.append_section(None, &status_section);
+}
+
+fn render_wifi_menu_results(menu: &gtk4::gio::Menu, mode: TaskbarMode, networks: Vec<WifiNetwork>) {
+    menu.remove_all();
+
+    let rescan_section = gtk4::gio::Menu::new();
+    rescan_section.append(Some(&refresh_label(mode)), Some("app.wifi-refresh"));
+    menu.append_section(None, &rescan_section);
+
+    if networks.is_empty() {
+        let empty_section = gtk4::gio::Menu::new();
+        empty_section.append(Some("No networks found"), None);
+        menu.append_section(None, &empty_section);
+        return;
+    }
+
+    let network_section = gtk4::gio::Menu::new();
+    for net in networks.iter().take(15) {
+        let nerd_icon = wifi_signal_icon(net.signal, net.in_use);
+        let icon = match mode {
+            TaskbarMode::Nerd => nerd_icon,
+            TaskbarMode::Icons => "\u{1f4f6}",
+            TaskbarMode::Text => "",
+        };
+        let connected_mark = if net.in_use { " \u{2713}" } else { "" }; // ✓
+        let lock = if net.security.contains("WPA") || net.security.contains("WEP") {
+            match mode {
+                TaskbarMode::Nerd => " \u{f033e}",  // 󰌾 lock
+                TaskbarMode::Icons => " \u{1f512}", // 🔒
+                TaskbarMode::Text => " (secured)",
+            }
+        } else {
+            ""
+        };
+        let label = if mode == TaskbarMode::Text {
+            format!("{}{}{}", net.ssid, lock, connected_mark)
+        } else {
+            format!("{}  {}{}{}", icon, net.ssid, lock, connected_mark)
+        };
+
+        let item = gtk4::gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some("app.wifi-connect"), Some(&net.ssid.to_variant()));
+        network_section.append_item(&item);
+    }
+    menu.append_section(None, &network_section);
+}
+
 /// Build the WiFi submenu and register actions.
 /// Returns the submenu to be inserted into the tray menu.
 pub fn build_wifi_submenu(app: &gtk4::Application, mode: TaskbarMode) -> gtk4::gio::Menu {
     let submenu = gtk4::gio::Menu::new();
+    register_wifi_menu(&submenu);
     populate_wifi_menu(&submenu, mode);
 
     // Action: connect to a WiFi network (parameter = SSID)
@@ -155,9 +258,8 @@ pub fn build_wifi_submenu(app: &gtk4::Application, mode: TaskbarMode) -> gtk4::g
 
         // Action: refresh WiFi list
         let refresh_action = gtk4::gio::SimpleAction::new("wifi-refresh", None);
-        let submenu_ref = submenu.clone();
         refresh_action.connect_activate(move |_, _| {
-            populate_wifi_menu(&submenu_ref, mode);
+            refresh_all_wifi_menus(mode);
         });
         app.add_action(&refresh_action);
     }
@@ -167,53 +269,23 @@ pub fn build_wifi_submenu(app: &gtk4::Application, mode: TaskbarMode) -> gtk4::g
 
 /// Populate/refresh the WiFi submenu with current scan results
 pub fn populate_wifi_menu(menu: &gtk4::gio::Menu, mode: TaskbarMode) {
-    menu.remove_all();
+    render_wifi_menu_loading(menu, mode);
 
-    let networks = scan_networks();
+    let menu_ref = menu.clone();
+    gtk4::glib::spawn_future_local(async move {
+        let (tx, rx) = async_channel::bounded::<Vec<WifiNetwork>>(1);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(scan_networks());
+        });
 
-    if networks.is_empty() {
-        menu.append(Some("No networks found"), Some("app.wifi-refresh"));
-        return;
-    }
-
-    for net in networks.iter().take(15) {
-        let nerd_icon = wifi_signal_icon(net.signal, net.in_use);
-        let icon = match mode {
-            TaskbarMode::Nerd => nerd_icon,
-            TaskbarMode::Icons => "\u{1f4f6}",
-            TaskbarMode::Text => "",
-        };
-        let connected_mark = if net.in_use { " \u{2713}" } else { "" }; // ✓
-        let lock = if net.security.contains("WPA") || net.security.contains("WEP") {
-            match mode {
-                TaskbarMode::Nerd => " \u{f033e}",  // 󰌾 lock
-                TaskbarMode::Icons => " \u{1f512}", // 🔒
-                TaskbarMode::Text => " (secured)",
+        match rx.recv().await {
+            Ok(networks) => render_wifi_menu_results(&menu_ref, mode, networks),
+            Err(e) => {
+                log::error!("WiFi scan channel failed: {}", e);
+                render_wifi_menu_results(&menu_ref, mode, Vec::new());
             }
-        } else {
-            ""
-        };
-        let label = if mode == TaskbarMode::Text {
-            format!("{}{}{}", net.ssid, lock, connected_mark)
-        } else {
-            format!("{}  {}{}{}", icon, net.ssid, lock, connected_mark)
-        };
-
-        let action = format!("app.wifi-connect");
-        let item = gtk4::gio::MenuItem::new(Some(&label), None);
-        item.set_action_and_target_value(Some(&action), Some(&net.ssid.to_variant()));
-        menu.append_item(&item);
-    }
-
-    // Separator + refresh option
-    let refresh_section = gtk4::gio::Menu::new();
-    let refresh_label = match mode {
-        TaskbarMode::Nerd => "\u{f0450}  Refresh".to_string(), // 󰑐
-        TaskbarMode::Icons => "\u{1f504}  Refresh".to_string(), // 🔄
-        TaskbarMode::Text => "Refresh".to_string(),
-    };
-    refresh_section.append(Some(&refresh_label), Some("app.wifi-refresh"));
-    menu.append_section(None, &refresh_section);
+        }
+    });
 }
 
 /// Show a GTK4 dialog asking for the WiFi password
