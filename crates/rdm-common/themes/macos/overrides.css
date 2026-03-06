@@ -77,7 +77,64 @@ popover contents        { border-radius: 12px; }
 .battery-normal  { color: @theme_green; }
 .battery-charging { color: @theme_active; }
 
-/* ── Launcher & search ──────────────────────────────────────────── */
+/* ── Calendar — aqua accents instead of green ──────────────────── */
+.calendar-date {
+    color: @macos_aqua;
+}
+
+calendar > header > button {
+    color: @macos_aqua;
+}
+
+calendar label.day-number:selected {
+    background-color: @macos_aqua;
+    color: #ffffff;
+}
+
+/* ── Launcher — light columns ──────────────────────────────────── */
+.menu-root {
+    background-color: @macos_panel_bg;
+    color: @macos_panel_fg;
+}
+
+.menu-left,
+.menu-left list,
+.menu-left listview {
+    background-color: @theme_deep_bg;
+    color: @macos_panel_fg;
+}
+
+.menu-categories row {
+    color: @macos_panel_fg;
+}
+
+.menu-apps row {
+    color: @macos_panel_fg;
+}
+
+.menu-app-name {
+    color: @macos_panel_fg;
+}
+
+.menu-right,
+.menu-right list,
+.menu-right listview {
+    background-color: @macos_panel_bg;
+    color: @macos_panel_fg;
+}
+
+.menu-fav-header {
+    color: @macos_aqua;
+}
+
+.menu-fav-name {
+    color: @theme_subtle;
+}
+
+.menu-hint {
+    color: @theme_muted;
+}
+
 .menu-search            { border-radius: 12px; }
 .menu-fav-tile          { border-radius: 12px; }
 .display-arrangement    { border-radius: 12px; }

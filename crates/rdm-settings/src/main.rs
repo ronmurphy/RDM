@@ -1309,9 +1309,10 @@ fn load_css() {
     let css = CssProvider::new();
     css.load_from_data(&rdm_common::theme::load_theme_css());
 
+    // Priority 801 beats the user's ~/.config/gtk-4.0/gtk.css (loaded at 800)
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("No display"),
         &css,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER + 1,
     );
 }

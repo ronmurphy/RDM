@@ -80,7 +80,8 @@ switch:checked {
     background-color: @theme_accent;
 }
 
-popover contents {
+popover contents,
+popover > contents {
     background-color: @theme_bg;
     color: @theme_fg;
     border: 1px solid @theme_border;
@@ -88,14 +89,20 @@ popover contents {
     padding: 4px 0;
 }
 
-popover modelbutton {
+popover > arrow {
+    background-color: @theme_bg;
+}
+
+popover modelbutton,
+modelbutton {
     padding: 6px 16px;
     color: @theme_fg;
     min-height: 0;
     font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
 }
 
-popover modelbutton:hover {
+popover modelbutton:hover,
+modelbutton:hover {
     background-color: @theme_surface;
 }
 
@@ -277,12 +284,20 @@ calendar label.other-month {
 
 .menu-left {
     background-color: @theme_deep_bg;
+    color: @theme_fg;
     padding: 4px 0;
+}
+
+.menu-left list,
+.menu-left listview {
+    background-color: @theme_deep_bg;
+    color: @theme_fg;
 }
 
 .menu-categories row {
     padding: 4px 0;
     color: @theme_fg;
+    background-color: transparent;
 }
 
 .menu-categories row:selected {
@@ -293,10 +308,17 @@ calendar label.other-month {
 .menu-apps row {
     padding: 2px 0;
     color: @theme_fg;
+    background-color: transparent;
 }
 
 .menu-apps row:hover {
     background-color: @theme_surface;
+}
+
+.menu-apps list,
+.menu-apps listview {
+    background-color: @theme_deep_bg;
+    color: @theme_fg;
 }
 
 .menu-app-name {
@@ -346,6 +368,13 @@ calendar label.other-month {
 
 .menu-right {
     background-color: @theme_bg;
+    color: @theme_fg;
+}
+
+.menu-right list,
+.menu-right listview {
+    background-color: @theme_bg;
+    color: @theme_fg;
 }
 
 /* ── Settings ──────────────────────────────────────────────────── */
