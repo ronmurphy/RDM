@@ -250,6 +250,26 @@ calendar label.other-month {
     background-color: @theme_surface;
 }
 
+/* SNI system tray (app icons) */
+.sni-tray {
+    background: transparent;
+}
+
+/* Icon-only SNI buttons: GTK adds .image-button automatically;
+   override its defaults so they match .tray-btn exactly. */
+.sni-item.image-button,
+.sni-item.image-button:hover {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    min-width: 0;
+    min-height: 0;
+}
+
+.sni-item.image-button:hover {
+    background-color: @theme_surface;
+}
+
 .battery-normal { color: @theme_green; }
 .battery-low { color: @theme_yellow; }
 .battery-critical { color: @theme_red; }

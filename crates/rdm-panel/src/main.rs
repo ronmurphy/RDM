@@ -1,4 +1,5 @@
 mod clock;
+mod sni;
 mod taskbar;
 mod toplevel;
 mod tray;
@@ -270,8 +271,13 @@ fn build_panel_window(
         None
     };
 
-    // Right: system tray (battery + power menu).
+    // Right: unified tray area — SNI app icons on the left, battery/power on the right.
+    let sni_tray = sni::setup_sni_tray();
     let tray = tray::setup_tray(app, mode);
+    let tray_area = gtk4::Box::new(Orientation::Horizontal, 0);
+    tray_area.add_css_class("tray-area");
+    tray_area.append(&sni_tray);
+    tray_area.append(&tray);
 
     append_panel_widget(
         &layout,
@@ -302,7 +308,7 @@ fn build_panel_window(
     append_panel_widget(
         &layout,
         "tray",
-        &tray,
+        &tray_area,
         &left_zone,
         &center_zone,
         &right_zone,
