@@ -1,11 +1,88 @@
 /* macOS — Overrides
-   Extra-rounded corners for the macOS pill-button look. */
+   Pill-shaped buttons, aqua tint, light panel, rounded everything. */
 
-button                  { border-radius: 8px; }
-entry, spinbutton       { border-radius: 8px; }
-dropdown, dropdown button { border-radius: 8px; }
-popover contents        { border-radius: 10px; }
-.taskbar-item           { border-radius: 6px; }
-.menu-search            { border-radius: 10px; }
-.menu-fav-tile          { border-radius: 10px; }
-.display-arrangement    { border-radius: 10px; }
+/* ── Pill shapes ───────────────────────────────────────────────── */
+button {
+    border-radius: 980px;
+    background-color: @macos_aqua;
+    color: #ffffff;
+    border: none;
+}
+
+button:hover {
+    background-color: @macos_aqua_hover;
+}
+
+button.suggested-action {
+    background-color: @theme_active;
+    color: #ffffff;
+}
+
+button.suggested-action:hover {
+    background-color: #3395ff;
+}
+
+entry, spinbutton       { border-radius: 10px; }
+dropdown, dropdown button { border-radius: 10px; }
+popover contents        { border-radius: 12px; }
+
+/* ── Panel — white bar, dark text ──────────────────────────────── */
+.panel {
+    background-color: @macos_panel_bg;
+    color: @macos_panel_fg;
+}
+
+.launcher-btn {
+    color: @theme_active;
+}
+
+.launcher-btn:hover {
+    background-color: @theme_border;
+}
+
+/* Taskbar items: subtle pill on light bar */
+.taskbar-item {
+    border-radius: 8px;
+    color: @macos_panel_fg;
+}
+
+.taskbar-item:hover {
+    background-color: @theme_border;
+}
+
+.taskbar-item.active {
+    background-color: @theme_active;
+    color: #ffffff;
+    border-radius: 8px;
+}
+
+/* Nerd-font icons: dark on light bar */
+.taskbar-nerd {
+    color: @macos_panel_fg;
+}
+
+/* ── Clock & Tray — dark text on light bar ─────────────────────── */
+.clock.tray-btn {
+    color: @macos_panel_fg;
+}
+
+.tray-btn {
+    color: @macos_panel_fg;
+}
+
+.tray-btn:hover {
+    background-color: @theme_border;
+}
+
+.battery-normal  { color: @theme_green; }
+.battery-charging { color: @theme_active; }
+
+/* ── Launcher & search ──────────────────────────────────────────── */
+.menu-search            { border-radius: 12px; }
+.menu-fav-tile          { border-radius: 12px; }
+.display-arrangement    { border-radius: 12px; }
+
+/* ── Watermark: darker for light backgrounds ───────────────────── */
+.watermark {
+    color: rgba(0, 0, 0, 0.15);
+}

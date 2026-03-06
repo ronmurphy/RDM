@@ -1,12 +1,13 @@
-/* Windows 10 — Color Palette */
-@define-color theme_bg #1e1e1e;
+/* Windows 11 — Color Palette
+   Dark chrome, pure white text, Windows blue accent. */
+@define-color theme_bg #202020;
 @define-color theme_fg #ffffff;
-@define-color theme_surface #2d2d2d;
-@define-color theme_border #3f3f3f;
+@define-color theme_surface #2d2d30;
+@define-color theme_border #3f3f46;
 @define-color theme_active #0078d4;
 @define-color theme_accent #0078d4;
 @define-color theme_accent_hover #1a8cde;
-@define-color theme_deep_bg #171717;
+@define-color theme_deep_bg #1b1b1b;
 @define-color theme_muted #888888;
 @define-color theme_subtle #cccccc;
 @define-color theme_green #16c60c;
@@ -16,3 +17,7 @@
 @define-color theme_purple #b4009e;
 @define-color theme_suggested_fg #ffffff;
 @define-color theme_contrast_fg #ffffff;
+
+/* Windows-specific extras */
+@define-color win_panel_bg #000000;
+@define-color win_panel_fg #ffffff;
