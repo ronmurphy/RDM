@@ -1,6 +1,6 @@
 # RDM — Rust Desktop Manager
 
-A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, and session management — with **9 built-in color themes** and a visual theme editor for creating your own.
+A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, session management, and NoTerm (a beginner-friendly terminal/files view) — with **9 built-in color themes** and a visual theme editor for creating your own.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Rust](https://img.shields.io/badge/rust-2021_edition-orange)
@@ -28,6 +28,13 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
   - Session controls — Lock, Logout, Reboot, Shutdown
 - **Wallpaper** — Managed via `swaybg`, configurable through the settings app (image path, fill mode, solid color fallback)
 - **Settings App** — GTK4 GUI to configure panel options (taskbar mode, position, height, clock), wallpaper (image, mode, background color), display arrangement, and a **Theme Editor** for creating custom color themes. Changes apply via hot reload.
+- **NoTerm (`rdm-noterm`)** — Guided terminal + file browser hybrid with:
+  - command input at the bottom (Enter runs + clears)
+  - enhanced clickable `ls` tiles with `..` as first item and single-click folder navigation
+  - raw/text/icons/nerd display modes
+  - built-in preview for common text/image files
+  - preview drawer hidden by default, slide-out on selection, with close `X`
+  - remembered display mode across launches (`~/.config/rdm/noterm-mode`)
 - **Hot Reload** — Rebuild any component, run `rdm-reload`, and see changes instantly without restarting the compositor or losing your windows
 - **Session Manager** — Manages autostart processes, automatic crash recovery, PID tracking, SIGUSR1-driven hot reload
 - **Version Watermark** — Subtle build version label on the desktop (layer-shell bottom)
@@ -50,7 +57,7 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 
 ## Architecture
 
-RDM is a Cargo workspace with 8 crates:
+RDM is a Cargo workspace with 9 crates:
 
 | Crate | Binary | Purpose |
 |-------|--------|---------|
@@ -59,6 +66,7 @@ RDM is a Cargo workspace with 8 crates:
 | `rdm-launcher` | `rdm-launcher` | Overlay app launcher — searches `.desktop` files, keyboard-driven |
 | `rdm-notify` | `rdm-notify` | Notification daemon — freedesktop D-Bus notifications with GTK4 layer-shell popups |
 | `rdm-settings` | `rdm-settings` | GTK4 settings GUI — panel, wallpaper, displays, and theme editor |
+| `rdm-noterm` | `rdm-noterm` | Guided terminal/files app with enhanced `ls`, click navigation, and inline previews |
 | `rdm-watermark` | `rdm-watermark` | Version watermark on desktop background |
 | `rdm-snap` | `rdm-snap` | Snap daemon (stub — labwc handles snapping natively for now) |
 | `rdm-common` | *(library)* | Shared config types, load/save, build info, 3-layer CSS theme system |

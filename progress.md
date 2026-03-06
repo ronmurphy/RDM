@@ -19,6 +19,7 @@ This document is a developer-facing reference for how RDM is built, what each co
 - [rdm-notify — Notification Daemon](#rdm-notify--notification-daemon)
 - [rdm-watermark — Version Watermark](#rdm-watermark--version-watermark)
 - [rdm-settings — Settings GUI](#rdm-settings--settings-gui)
+- [rdm-noterm — Guided Terminal + File Browser](#rdm-noterm--guided-terminal--file-browser)
 - [rdm-snap — Snap Daemon (Stub)](#rdm-snap--snap-daemon-stub)
 - [Hot Reload System](#hot-reload-system)
 - [Theming](#theming)
@@ -30,7 +31,7 @@ This document is a developer-facing reference for how RDM is built, what each co
 
 ## Overview
 
-RDM (Rust Desktop Manager) is a Wayland desktop environment that runs on top of **labwc**, a wlroots-based compositor. The project is a Cargo workspace with 8 crates — 7 binaries and 1 shared library.
+RDM (Rust Desktop Manager) is a Wayland desktop environment that runs on top of **labwc**, a wlroots-based compositor. The project is a Cargo workspace with 9 crates — 8 binaries and 1 shared library.
 
 All GUI components use **GTK4** with **gtk4-layer-shell** to create shell surfaces (panels, overlays, desktop widgets). The taskbar uses the **wlr-foreign-toplevel-management** Wayland protocol directly via `wayland-client` to track open windows.
 
@@ -61,6 +62,7 @@ RDM/
 │   ├── rdm-panel/             # Panel bar (taskbar, clock, tray, wifi)
 │   ├── rdm-launcher/          # Overlay app launcher
 │   ├── rdm-notify/            # Notification daemon (freedesktop D-Bus)
+│   ├── rdm-noterm/            # Guided terminal + file browser hybrid
 │   ├── rdm-watermark/         # Desktop version watermark
 │   ├── rdm-settings/          # GTK4 settings app
 │   └── rdm-snap/              # Window snap daemon (stub)
@@ -303,6 +305,47 @@ A regular GTK4 window (not layer-shell) with a `Stack` + `StackSidebar` layout. 
 5. Session manager stops all children, waits 800ms, restarts with fresh config
 6. `rdm-panel` reads new taskbar mode, position, etc. from `rdm.toml`
 7. `swaybg` gets new wallpaper args built from `rdm.toml`
+
+---
+
+## rdm-noterm — Guided Terminal + File Browser
+
+**Path:** `crates/rdm-noterm/`  
+**Binary:** `rdm-noterm`
+
+NoTerm is a beginner-friendly "not a terminal" app that combines command execution with clickable file navigation.
+
+### Core Behavior
+
+- Command entry is at the bottom.
+- Enter or Run executes in the current directory and clears the input.
+- `cd <path>` and `pwd` are handled directly.
+- Other commands run via `sh -lc` in current directory.
+
+### Enhanced `ls` View
+
+- `ls` output can render as raw text, text tiles, emoji icons, or nerd icons.
+- Tiles are clickable:
+  - first item is always `..` (parent directory)
+  - single-click directory enters it
+  - single-click previewable file opens inline preview
+  - double-click non-previewable file shell-opens via `xdg-open`
+- Search filter and hidden-file toggle apply to enhanced `ls`.
+
+### Preview Drawer
+
+- Preview panel is hidden by default.
+- Clicking previewable content reveals a slide-out drawer from the right.
+- Drawer targets a wide preview split (approximately 75% preview / 25% output).
+- Top-left `X` closes the drawer and returns to navigation.
+- Image preview uses contain-fit drawing in a `DrawingArea`.
+- Text preview reads and truncates large files for safety.
+
+### Persistence
+
+- Mode selection (`raw/text/icons/nerd`) is persisted to:
+  - `~/.config/rdm/noterm-mode`
+- On startup, NoTerm restores the last selected mode.
 
 ---
 
