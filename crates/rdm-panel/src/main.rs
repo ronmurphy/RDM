@@ -18,7 +18,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 fn main() {
-    env_logger::init();
+    env_logger::Builder::from_env(
+        env_logger::Env::default()
+            .default_filter_or("rdm_panel::sni=debug,rdm_panel=info,info"),
+    )
+    .init();
     log::info!("Starting RDM Panel");
 
     if !is_rdm_session() {
