@@ -20,6 +20,17 @@ err()   { echo -e "${RED}  ✗ $1${NC}"; exit 1; }
 
 cd "$SCRIPT_DIR"
 
+# Auto-increment build number
+BUILD_FILE="$SCRIPT_DIR/.build_number"
+if [ -f "$BUILD_FILE" ]; then
+    BUILD_NUM=$(cat "$BUILD_FILE")
+else
+    BUILD_NUM=0
+fi
+BUILD_NUM=$((BUILD_NUM + 1))
+echo "$BUILD_NUM" > "$BUILD_FILE"
+info "Build #$BUILD_NUM"
+
 info "Running cargo check workspace gate..."
 cargo check --workspace
 ok "cargo check passed"
