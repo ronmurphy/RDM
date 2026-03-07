@@ -4,6 +4,7 @@ use gtk4::{
     Orientation, Paned, Picture, Popover, ScrolledWindow, StringList, Switch, TextView,
 };
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -88,6 +89,8 @@ struct UiState {
     open_system_btn: Button,
     selected_path: Option<PathBuf>,
     refresh_ls_widget: Option<gtk4::Widget>,
+    output_scroll: ScrolledWindow,
+    cmd_blocks: VecDeque<GtkBox>,
     nav_history: Vec<PathBuf>,
     nav_pos: usize,
     back_btn: Button,
@@ -274,6 +277,8 @@ fn build_ui(app: &Application) {
         open_system_btn: open_system_btn.clone(),
         selected_path: None,
         refresh_ls_widget: None,
+        output_scroll: output_scroll.clone(),
+        cmd_blocks: VecDeque::new(),
         nav_history: vec![initial_cwd],
         nav_pos: 0,
         back_btn: back_btn.clone(),
@@ -393,11 +398,12 @@ fn build_ui(app: &Application) {
 }
 
 fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
-    append_block_label(state, &format!("$ {}", cmd), "noterm-command");
+    let block = begin_cmd_block(state, &format!("$ {}", cmd));
 
     if cmd == "pwd" {
         let cwd = state.borrow().cwd.display().to_string();
-        append_block_text(state, &format!("{}\n", cwd));
+        add_text_to_block(&block, &format!("{}\n", cwd));
+        scroll_output_to_bottom(state);
         return;
     }
 
@@ -409,11 +415,12 @@ fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
             s.cwd_label.set_text(&s.cwd.display().to_string());
             drop(s);
             rebuild_breadcrumb(state);
-            append_block_text(state, "");
+            add_text_to_block(&block, "");
         } else {
             drop(s);
-            append_block_text(state, "cd: target is not a directory\n");
+            add_text_to_block(&block, "cd: target is not a directory\n");
         }
+        scroll_output_to_bottom(state);
         return;
     }
 
@@ -443,7 +450,8 @@ fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
         let output = match rx.recv().await {
             Ok(v) => v,
             Err(_) => {
-                append_block_text(&state_result, "Failed to receive command output\n");
+                add_text_to_block(&block, "Failed to receive command output\n");
+                scroll_output_to_bottom(&state_result);
                 return;
             }
         };
@@ -459,47 +467,63 @@ fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
                     if entries.is_empty() {
                         let parsed = parse_ls_entries(&combined, &cwd);
                         if parsed.is_empty() {
-                            append_block_text(&state_result, &combined);
+                            add_text_to_block(&block, &combined);
                         } else {
-                            append_ls_block(&state_result, parsed);
+                            let flow = build_ls_flow(&state_result, parsed);
+                            block.append(&flow);
                         }
                     } else {
-                        append_ls_block(&state_result, entries);
+                        let flow = build_ls_flow(&state_result, entries);
+                        block.append(&flow);
                     }
                 } else {
-                    append_block_text(&state_result, &combined);
+                    add_text_to_block(&block, &combined);
                 }
             }
             Err(e) => {
-                append_block_text(
-                    &state_result,
-                    &format!("Failed to execute command: {}\n", e),
-                );
+                add_text_to_block(&block, &format!("Failed to execute command: {}\n", e));
             }
         }
+        scroll_output_to_bottom(&state_result);
     });
 }
 
-fn append_block_label(state: &Rc<RefCell<UiState>>, text: &str, class_name: &str) {
-    let label = Label::new(Some(text));
+// Creates a command block container, prunes oldest if over 10, appends to output_box.
+fn begin_cmd_block(state: &Rc<RefCell<UiState>>, header: &str) -> GtkBox {
+    let block = GtkBox::new(Orientation::Vertical, 4);
+    let label = Label::new(Some(header));
     label.set_xalign(0.0);
-    label.add_css_class(class_name);
-    state.borrow().output_box.append(&label);
+    label.add_css_class("noterm-command");
+    block.append(&label);
+
+    let mut s = state.borrow_mut();
+    if s.cmd_blocks.len() >= 10 {
+        if let Some(old) = s.cmd_blocks.pop_front() {
+            s.output_box.remove(&old);
+        }
+    }
+    s.output_box.append(&block);
+    s.cmd_blocks.push_back(block.clone());
+    block
 }
 
-fn append_block_text(state: &Rc<RefCell<UiState>>, text: &str) {
+fn add_text_to_block(block: &GtkBox, text: &str) {
     let view = TextView::new();
     view.set_editable(false);
     view.set_cursor_visible(false);
     view.set_monospace(true);
     view.add_css_class("noterm-output");
     view.buffer().set_text(text);
-    state.borrow().output_box.append(&view);
+    block.append(&view);
 }
 
-fn append_ls_block(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) {
-    let flow = build_ls_flow(state, entries);
-    state.borrow().output_box.append(&flow);
+// Defers scroll-to-bottom until after GTK has finished the current layout pass.
+fn scroll_output_to_bottom(state: &Rc<RefCell<UiState>>) {
+    let scroll = state.borrow().output_scroll.clone();
+    gtk4::glib::idle_add_local_once(move || {
+        let adj = scroll.vadjustment();
+        adj.set_value(adj.upper() - adj.page_size());
+    });
 }
 
 fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::FlowBox {
