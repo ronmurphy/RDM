@@ -76,6 +76,24 @@ async fn main() {
     env_logger::init();
     log::info!("Starting RDM Session Manager (pid={})", std::process::id());
 
+    // Only run inside the RDM desktop environment
+    if std::env::var("RDM_SESSION").as_deref() != Ok("1") {
+        log::warn!("RDM_SESSION is not set — not running inside rdm-start. Exiting.");
+        eprintln!("rdm-session: not inside RDM desktop (RDM_SESSION!=1), exiting.");
+        std::process::exit(0);
+    }
+
+    // Single-instance guard: exit if another rdm-session is already running
+    // under the same WAYLAND_DISPLAY (allows different compositor instances)
+    if let Some(existing_pid) = check_existing_instance() {
+        log::warn!(
+            "Another rdm-session is already running (pid={}). Exiting.",
+            existing_pid
+        );
+        eprintln!("rdm-session already running (pid={}), exiting.", existing_pid);
+        std::process::exit(0);
+    }
+
     // Install SIGUSR1 handler for hot reload
     install_signal_handler();
 
@@ -254,9 +272,16 @@ fn stop_all(processes: &mut Vec<ManagedProcess>) {
 }
 
 fn spawn_process(entry: &AutostartEntry) -> Option<Child> {
-    // For swaybg, build args from rdm.toml wallpaper config instead of session.toml args
+    // For swaybg/swayidle, build args from rdm.toml config instead of session.toml args
     let args: Vec<String> = if entry.command == "swaybg" {
         build_swaybg_args()
+    } else if entry.command == "swayidle" {
+        let idle_args = build_swayidle_args();
+        if idle_args.is_empty() {
+            log::info!("Idle disabled, skipping swayidle launch");
+            return None;
+        }
+        idle_args
     } else {
         entry.args.clone()
     };
@@ -272,6 +297,40 @@ fn spawn_process(entry: &AutostartEntry) -> Option<Child> {
         .spawn()
         .map_err(|e| log::error!("Failed to start {}: {}", entry.name, e))
         .ok()
+}
+
+/// Build swayidle arguments from the idle config in rdm.toml
+///
+/// swayidle syntax:
+///   swayidle -w timeout <secs> '<cmd>' resume '<cmd>' [timeout <secs> '<cmd>' ...]
+///
+/// We use `wlopm` for DPMS control if available, otherwise fall back to
+/// `swaymsg output '*' dpms off/on` (sway-only).  labwc ships with wlopm
+/// support, so that's the primary path.
+fn build_swayidle_args() -> Vec<String> {
+    let config = rdm_common::config::RdmConfig::load();
+    let idle = &config.idle;
+    let mut args = Vec::new();
+
+    if !idle.enabled {
+        log::info!("Idle management disabled in config");
+        return args;
+    }
+
+    // -w flag: also react to logind idle hints (lock screen, lid switch, etc.)
+    args.push("-w".to_string());
+
+    // Screen off: DPMS off after screen_off_secs, resume on input
+    if idle.screen_off_secs > 0 {
+        args.push("timeout".to_string());
+        args.push(idle.screen_off_secs.to_string());
+        args.push("wlopm --off '*'".to_string());
+        args.push("resume".to_string());
+        args.push("wlopm --on '*'".to_string());
+    }
+
+    log::info!("swayidle args: {:?}", args);
+    args
 }
 
 /// Build swaybg arguments from the wallpaper config in rdm.toml
@@ -291,15 +350,74 @@ fn build_swaybg_args() -> Vec<String> {
     args
 }
 
+/// Check if another rdm-session is already running by reading the PID file
+/// and verifying the process is alive. Returns `Some(pid)` if a live instance
+/// exists, `None` otherwise (safe to proceed).
+fn check_existing_instance() -> Option<u32> {
+    let pid_path = rdm_common::config::config_dir().join("session.pid");
+    let contents = std::fs::read_to_string(&pid_path).ok()?;
+
+    // PID file format: "<pid>\n<WAYLAND_DISPLAY>" (second line optional)
+    let mut lines = contents.lines();
+    let pid: u32 = lines.next()?.trim().parse().ok()?;
+    let stored_display = lines.next().unwrap_or("").trim().to_string();
+
+    // Don't block on our own PID (shouldn't happen, but be safe)
+    if pid == std::process::id() {
+        return None;
+    }
+
+    // If the stored session was on a different WAYLAND_DISPLAY, it's stale
+    let current_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
+    if !stored_display.is_empty() && !current_display.is_empty() && stored_display != current_display {
+        log::info!(
+            "Stale PID file (display was {}, now {}), ignoring",
+            stored_display, current_display
+        );
+        return None;
+    }
+
+    // Check if the process is alive by sending signal 0
+    match signal::kill(Pid::from_raw(pid as i32), None) {
+        Ok(()) => {
+            // Process exists — verify it's actually rdm-session, not a recycled PID
+            let cmdline_path = format!("/proc/{}/cmdline", pid);
+            if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
+                if cmdline.contains("rdm-session") {
+                    return Some(pid);
+                }
+                // PID was recycled for a different process — stale PID file
+                log::info!("Stale PID file (pid={} is now {:?}), ignoring", pid, cmdline);
+                return None;
+            }
+            // /proc not readable (unlikely on Linux) — assume it's ours to be safe
+            Some(pid)
+        }
+        Err(_) => {
+            // Process is dead — stale PID file
+            log::info!("Stale PID file (pid={} is dead), ignoring", pid);
+            None
+        }
+    }
+}
+
 fn write_pid_file() {
     let run_dir = rdm_common::config::config_dir();
     let _ = std::fs::create_dir_all(&run_dir);
     let pid_path = run_dir.join("session.pid");
-    if let Err(e) = std::fs::write(&pid_path, std::process::id().to_string()) {
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
+    let contents = format!("{}\n{}", std::process::id(), wayland_display);
+    if let Err(e) = std::fs::write(&pid_path, contents) {
         log::error!("Failed to write PID file: {}", e);
     } else {
-        log::info!("PID file written to {:?}", pid_path);
+        log::info!("PID file written to {:?} (display={})", pid_path, wayland_display);
     }
+}
+
+fn cleanup_pid_file() {
+    let pid_path = rdm_common::config::config_dir().join("session.pid");
+    let _ = std::fs::remove_file(&pid_path);
+    log::info!("PID file removed");
 }
 
 fn load_session_config() -> SessionConfig {

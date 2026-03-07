@@ -11,7 +11,7 @@ if [ ! -f "$PID_FILE" ]; then
     exit 1
 fi
 
-PID=$(cat "$PID_FILE")
+PID=$(head -1 "$PID_FILE")
 
 if ! kill -0 "$PID" 2>/dev/null; then
     echo "ERROR: rdm-session (pid=$PID) is not running"

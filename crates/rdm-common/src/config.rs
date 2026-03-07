@@ -24,6 +24,8 @@ pub struct RdmConfig {
     pub appearance: AppearanceConfig,
     #[serde(default)]
     pub displays: Vec<DisplayConfig>,
+    #[serde(default)]
+    pub idle: IdleConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -73,6 +75,30 @@ pub struct MenuConfig {
 pub struct AppearanceConfig {
     #[serde(default = "default_theme")]
     pub theme: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct IdleConfig {
+    /// Whether idle/DPMS management is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Seconds of inactivity before the screen blanks (DPMS off).
+    /// Mouse movement or keyboard input will wake the display.
+    #[serde(default = "default_idle_screen_off")]
+    pub screen_off_secs: u64,
+}
+
+impl Default for IdleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            screen_off_secs: default_idle_screen_off(),
+        }
+    }
+}
+
+fn default_idle_screen_off() -> u64 {
+    300 // 5 minutes
 }
 
 fn default_legacy_config_schema_version() -> u32 {
@@ -209,6 +235,7 @@ impl Default for RdmConfig {
             menu: MenuConfig::default(),
             appearance: AppearanceConfig::default(),
             displays: Vec::new(),
+            idle: IdleConfig::default(),
         }
     }
 }

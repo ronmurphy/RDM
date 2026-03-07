@@ -36,6 +36,14 @@ AUTOSTART="$LABWC_DIR/autostart"
 cat > "$AUTOSTART" << 'EOF'
 #!/bin/sh
 # RDM autostart — managed by rdm-start
+# Only launch rdm-session when running as the RDM desktop environment
+if [ "$RDM_SESSION" != "1" ]; then
+    exit 0
+fi
+# Guard: don't launch a second session manager
+if pgrep -x rdm-session >/dev/null 2>&1; then
+    exit 0
+fi
 LOG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/rdm.log"
 rdm-session >> "$LOG_FILE" 2>&1 &
 EOF

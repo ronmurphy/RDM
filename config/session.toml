@@ -25,6 +25,12 @@ command = "rdm-notify"
 args = []
 restart = true
 
+[[autostart]]
+name = "swayidle"
+command = "swayidle"
+args = []
+restart = true
+
 # Uncomment to auto-start the snap daemon:
 # [[autostart]]
 # name = "rdm-snap"

@@ -20,3 +20,7 @@ ui_mode = "winxp_classic"
 [snap]
 edge_threshold = 20
 show_preview = true
+
+[idle]
+enabled = true
+screen_off_secs = 300   # 5 minutes — blank screen, any input wakes it

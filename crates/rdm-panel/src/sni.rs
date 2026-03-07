@@ -676,7 +676,7 @@ fn sni_variant_property(proxy: &gio::DBusProxy, prop: &str) -> Option<glib::Vari
             Some(&args),
             None,
             gio::DBusCallFlags::NONE,
-            1000,
+            200,
             gio::Cancellable::NONE,
         )
         .map_err(|e| {
@@ -734,7 +734,7 @@ fn register_status_notifier_host(conn: &gio::DBusConnection, host_name: &str) ->
             Some(&(host_name,).to_variant()),
             None,
             gio::DBusCallFlags::NONE,
-            1000,
+            100,  // 100ms timeout — fail fast, retry loop will try again
             gio::Cancellable::NONE,
         );
         match res {
@@ -752,7 +752,7 @@ fn schedule_host_registration(
 ) {
     let attempts = Rc::new(std::cell::Cell::new(0u8));
     let attempts_c = attempts.clone();
-    glib::timeout_add_local(Duration::from_millis(300), move || {
+    glib::timeout_add_local(Duration::from_millis(500), move || {
         let n = attempts_c.get().saturating_add(1);
         attempts_c.set(n);
 
@@ -762,7 +762,7 @@ fn schedule_host_registration(
             return glib::ControlFlow::Break;
         }
 
-        if n >= 20 {
+        if n >= 10 {
             log::warn!("SNI: host registration retries exhausted");
             return glib::ControlFlow::Break;
         }
@@ -780,7 +780,7 @@ fn seed_items_from_bus_names(conn: &gio::DBusConnection, tx: &async_channel::Sen
         None,
         None,
         gio::DBusCallFlags::NONE,
-        1000,
+        200,
         gio::Cancellable::NONE,
     ) else {
         log::debug!("SNI: ListNames failed, skipping bus-seed fallback");
