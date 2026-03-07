@@ -1,13 +1,65 @@
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppEntry {
     pub name: String,
     pub exec: String,
     pub comment: Option<String>,
     pub icon: Option<String>,
     pub categories: Vec<String>,
+}
+
+fn cache_path() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("rdm")
+        .join("apps.json")
+}
+
+fn dir_mtime(path: &PathBuf) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+/// Load desktop entries, using a file cache at ~/.cache/rdm/apps.json.
+/// The cache is rebuilt whenever any watched app directory is newer than the cache.
+pub fn load_desktop_entries_cached() -> Vec<AppEntry> {
+    let cache = cache_path();
+    let dirs = desktop_dirs();
+
+    if let Ok(cache_meta) = std::fs::metadata(&cache) {
+        if let Ok(cache_mtime) = cache_meta.modified() {
+            let stale = dirs
+                .iter()
+                .any(|d| dir_mtime(d).map(|m| m > cache_mtime).unwrap_or(false));
+
+            if !stale {
+                if let Ok(data) = std::fs::read_to_string(&cache) {
+                    if let Ok(entries) = serde_json::from_str::<Vec<AppEntry>>(&data) {
+                        log::debug!("App cache hit ({} entries)", entries.len());
+                        return entries;
+                    }
+                }
+            }
+        }
+    }
+
+    log::debug!("App cache miss — scanning desktop dirs");
+    let entries = load_desktop_entries();
+    if let Some(parent) = cache.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string(&entries) {
+        let _ = std::fs::write(&cache, json);
+    }
+    entries
+}
+
+/// Delete the app cache, forcing a full rescan on next launch.
+pub fn invalidate_app_cache() {
+    let _ = std::fs::remove_file(cache_path());
 }
 
 pub fn load_desktop_entries() -> Vec<AppEntry> {

@@ -224,7 +224,7 @@ fn build_menu_content_classic(
     left_pane.add_css_class("menu-left");
 
     // Load apps
-    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let entries = Rc::new(desktop_apps::load_desktop_entries_cached());
     let categorized = Rc::new(desktop_apps::categorize_entries(&entries));
     let color_cache = build_color_cache(&entries, mode);
 
@@ -307,16 +307,6 @@ fn build_menu_content_classic(
     fav_scroll.set_child(Some(fav_flow.as_ref()));
     right_pane.append(&fav_scroll);
 
-    // Now populate app list (needs fav_flow reference for context menus)
-    populate_app_list(
-        app,
-        &app_list,
-        &entries,
-        mode,
-        config,
-        &fav_flow,
-        &color_cache,
-    );
     let hint = Label::new(Some("Right-click app to add/remove from favorites."));
     hint.add_css_class("menu-hint");
     hint.set_halign(gtk4::Align::Start);
@@ -505,7 +495,7 @@ fn build_menu_content_win11(
     }
     root.append(&top_bar);
 
-    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let entries = Rc::new(desktop_apps::load_desktop_entries_cached());
     let color_cache = build_color_cache(&entries, mode);
 
     let grid_scroll = ScrolledWindow::new();
@@ -610,7 +600,7 @@ fn build_menu_content_spotlight(
     top_bar.set_margin_bottom(10);
     root.append(&top_bar);
 
-    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let entries = Rc::new(desktop_apps::load_desktop_entries_cached());
     let color_cache = build_color_cache(&entries, mode);
     let results_state: Rc<RefCell<Vec<AppEntry>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -713,7 +703,7 @@ fn build_menu_content_whisker(
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
     split.set_vexpand(true);
 
-    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let entries = Rc::new(desktop_apps::load_desktop_entries_cached());
     let categorized = Rc::new(desktop_apps::categorize_entries(&entries));
     let color_cache = build_color_cache(&entries, mode);
 
@@ -778,16 +768,6 @@ fn build_menu_content_whisker(
     app_list.add_css_class("menu-apps");
     app_scroll.set_child(Some(&app_list));
     right_pane.append(&app_scroll);
-
-    populate_app_list(
-        app,
-        &app_list,
-        &entries,
-        mode,
-        config,
-        &fav_flow,
-        &color_cache,
-    );
 
     split.append(&cat_pane);
     split.append(&gtk4::Separator::new(Orientation::Vertical));
@@ -941,7 +921,7 @@ fn build_menu_content_retro98(
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
     split.set_vexpand(true);
 
-    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let entries = Rc::new(desktop_apps::load_desktop_entries_cached());
     let categorized = Rc::new(desktop_apps::categorize_entries(&entries));
     let color_cache = build_color_cache(&entries, mode);
 
@@ -991,15 +971,6 @@ fn build_menu_content_retro98(
     root.append(&split);
 
     let dummy_fav_flow = Rc::new(gtk4::FlowBox::new());
-    populate_app_list(
-        app,
-        &app_list,
-        &entries,
-        mode,
-        config,
-        &dummy_fav_flow,
-        &color_cache,
-    );
 
     let entries_for_cat = entries.clone();
     let categorized_for_cat = categorized.clone();
