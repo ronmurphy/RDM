@@ -1,4 +1,5 @@
 mod clock;
+mod dbusmenu;
 mod sni;
 mod taskbar;
 mod toplevel;

@@ -4,6 +4,7 @@
 /// embed their tray icons in our panel.  D-Bus callbacks are Send+Sync, so
 /// shared watcher state uses `Arc<Mutex<_>>`.  Icon buttons are created on the
 /// GTK main thread via an `async_channel`.
+use crate::dbusmenu;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -314,7 +315,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
                     let mut boxes_ref = boxes.borrow_mut();
                     for sni_box in boxes_ref.iter_mut() {
                         let Some(b) = sni_box.weak.upgrade() else { continue };
-                        let btn = make_sni_button(&proxy);
+                        let btn = make_sni_button(&proxy, &conn_ev);
                         b.append(&btn);
                         sni_box.buttons.insert(key.clone(), btn);
                     }
@@ -336,7 +337,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
                     let Some(b) = weak.upgrade() else { continue };
                     let mut buttons = HashMap::new();
                     for (key, item) in items.borrow().iter() {
-                        let btn = make_sni_button(&item.proxy);
+                        let btn = make_sni_button(&item.proxy, &conn_ev);
                         b.append(&btn);
                         buttons.insert(key.clone(), btn);
                     }
@@ -403,7 +404,7 @@ async fn create_sni_proxy(
 
 /// Build a tray button wired up to an existing SNI proxy.
 /// Safe to call multiple times for the same proxy (one button per panel box).
-fn make_sni_button(proxy: &gio::DBusProxy) -> gtk4::Button {
+fn make_sni_button(proxy: &gio::DBusProxy, conn: &gio::DBusConnection) -> gtk4::Button {
     let btn = gtk4::Button::new();
     btn.set_has_frame(false);
     btn.add_css_class("tray-btn");
@@ -435,30 +436,47 @@ fn make_sni_button(proxy: &gio::DBusProxy) -> gtk4::Button {
         );
     });
 
-    // Right-click → ContextMenu(x, y).
+    // Right-click: prefer DBusMenu if the item advertises a Menu path;
+    // fall back to the SNI ContextMenu D-Bus call otherwise.
+    let menu_path = proxy
+        .cached_property("Menu")
+        .and_then(|v| v.str().map(|s| s.to_string()))
+        .filter(|s| !s.is_empty());
+    let service = proxy
+        .name()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let conn_r = conn.clone();
     let proxy_r = proxy.clone();
     let gesture = gtk4::GestureClick::new();
     gesture.set_button(3);
     gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
     gesture.connect_pressed(move |g, _n, x, y| {
         g.set_state(gtk4::EventSequenceState::Claimed);
-        let (rx, ry) = g
-            .widget()
-            .and_then(|w| {
-                let root = w.root()?;
-                let pt = gtk4::graphene::Point::new(x as f32, y as f32);
-                w.compute_point(root.upcast_ref::<gtk4::Widget>(), &pt)
-                    .map(|p| (p.x() as i32, p.y() as i32))
-            })
-            .unwrap_or((x as i32, y as i32));
-        proxy_r.call(
-            "ContextMenu",
-            Some(&(rx, ry).to_variant()),
-            gio::DBusCallFlags::NONE,
-            -1,
-            gio::Cancellable::NONE,
-            |_| {},
-        );
+        let Some(btn_widget) = g.widget() else { return };
+        let btn_ref = btn_widget.downcast_ref::<gtk4::Button>().unwrap();
+        if let Some(ref path) = menu_path {
+            dbusmenu::show(&conn_r, &service, path, btn_ref);
+        } else {
+            // Fall back: let the app draw its own menu.
+            let (rx, ry) = g
+                .widget()
+                .and_then(|w| {
+                    let root = w.root()?;
+                    let pt = gtk4::graphene::Point::new(x as f32, y as f32);
+                    w.compute_point(root.upcast_ref::<gtk4::Widget>(), &pt)
+                        .map(|p| (p.x() as i32, p.y() as i32))
+                })
+                .unwrap_or((x as i32, y as i32));
+            proxy_r.call(
+                "ContextMenu",
+                Some(&(rx, ry).to_variant()),
+                gio::DBusCallFlags::NONE,
+                -1,
+                gio::Cancellable::NONE,
+                |_| {},
+            );
+        }
     });
     btn.add_controller(gesture);
 
