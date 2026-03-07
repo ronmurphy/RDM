@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DropDown, Entry, Label,
-    Orientation, Paned, Picture, ScrolledWindow, StringList, Switch, TextView,
+    Orientation, Paned, Picture, Popover, ScrolledWindow, StringList, Switch, TextView,
 };
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -88,6 +88,12 @@ struct UiState {
     open_system_btn: Button,
     selected_path: Option<PathBuf>,
     refresh_ls_widget: Option<gtk4::Widget>,
+    nav_history: Vec<PathBuf>,
+    nav_pos: usize,
+    back_btn: Button,
+    forward_btn: Button,
+    status_label: Label,
+    icon_size: u32,
 }
 
 fn main() {
@@ -102,6 +108,7 @@ fn main() {
 fn build_ui(app: &Application) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let initial_mode = load_saved_mode();
+    let initial_icon_size = load_saved_icon_size();
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -128,13 +135,32 @@ fn build_ui(app: &Application) {
         gtk4::Expression::NONE,
     );
     mode_dd.set_selected(initial_mode.selected_index());
+    let size_label = Label::new(Some("Size"));
+    let size_dd = DropDown::new(
+        Some(StringList::new(&["32", "64", "96", "128"])),
+        gtk4::Expression::NONE,
+    );
+    size_dd.set_selected(match initial_icon_size {
+        32 => 0,
+        96 => 2,
+        128 => 3,
+        _ => 1,
+    });
     top.append(&cwd_title);
     top.append(&cwd_label);
     top.append(&mode_label);
     top.append(&mode_dd);
+    top.append(&size_label);
+    top.append(&size_dd);
     root.append(&top);
 
     let nav_row = GtkBox::new(Orientation::Horizontal, 8);
+    let back_btn = Button::with_label("◀");
+    back_btn.set_tooltip_text(Some("Back"));
+    back_btn.set_sensitive(false);
+    let forward_btn = Button::with_label("▶");
+    forward_btn.set_tooltip_text(Some("Forward"));
+    forward_btn.set_sensitive(false);
     let breadcrumb_box = GtkBox::new(Orientation::Horizontal, 2);
     breadcrumb_box.set_hexpand(true);
     let search_entry = Entry::new();
@@ -142,6 +168,8 @@ fn build_ui(app: &Application) {
     search_entry.set_width_chars(24);
     let hidden_label = Label::new(Some("Hidden"));
     let hidden_switch = Switch::new();
+    nav_row.append(&back_btn);
+    nav_row.append(&forward_btn);
     nav_row.append(&breadcrumb_box);
     nav_row.append(&search_entry);
     nav_row.append(&hidden_label);
@@ -166,6 +194,7 @@ fn build_ui(app: &Application) {
     let output_scroll = ScrolledWindow::new();
     output_scroll.set_vexpand(true);
     output_scroll.set_hexpand(true);
+    output_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     let output_box = GtkBox::new(Orientation::Vertical, 8);
     output_scroll.set_child(Some(&output_box));
     paned.set_start_child(Some(&output_scroll));
@@ -219,10 +248,16 @@ fn build_ui(app: &Application) {
     main_row.append(&places_box);
     main_row.append(&paned);
 
+    let status_label = Label::new(Some(""));
+    status_label.set_xalign(0.0);
+    status_label.add_css_class("noterm-status");
+
     root.append(&main_row);
     root.append(&cmd_row);
+    root.append(&status_label);
     window.set_child(Some(&root));
 
+    let initial_cwd = cwd.clone();
     let state = Rc::new(RefCell::new(UiState {
         cwd,
         mode: initial_mode,
@@ -239,6 +274,12 @@ fn build_ui(app: &Application) {
         open_system_btn: open_system_btn.clone(),
         selected_path: None,
         refresh_ls_widget: None,
+        nav_history: vec![initial_cwd],
+        nav_pos: 0,
+        back_btn: back_btn.clone(),
+        forward_btn: forward_btn.clone(),
+        status_label: status_label.clone(),
+        icon_size: initial_icon_size,
     }));
 
     {
@@ -248,6 +289,21 @@ fn build_ui(app: &Application) {
             state_mode.borrow_mut().mode = mode;
             save_mode(mode);
             refresh_ls_view(&state_mode);
+        });
+    }
+
+    {
+        let state_size = state.clone();
+        size_dd.connect_selected_notify(move |dd| {
+            let size = match dd.selected() {
+                0 => 32u32,
+                2 => 96,
+                3 => 128,
+                _ => 64,
+            };
+            state_size.borrow_mut().icon_size = size;
+            save_icon_size(size);
+            refresh_ls_view(&state_size);
         });
     }
 
@@ -306,22 +362,32 @@ fn build_ui(app: &Application) {
         });
     }
 
+    {
+        let state_back = state.clone();
+        back_btn.connect_clicked(move |_| {
+            navigate_back(&state_back);
+        });
+    }
+
+    {
+        let state_fwd = state.clone();
+        forward_btn.connect_clicked(move |_| {
+            navigate_forward(&state_fwd);
+        });
+    }
+
     for (btn, target) in place_buttons {
         let state_btn = state.clone();
         btn.connect_clicked(move |_| {
             if target.is_dir() {
-                {
-                    let mut s = state_btn.borrow_mut();
-                    s.cwd = target.clone();
-                    s.cwd_label.set_text(&s.cwd.display().to_string());
-                }
-                rebuild_breadcrumb(&state_btn);
-                refresh_ls_view(&state_btn);
+                navigate_to(&state_btn, target.clone());
             }
         });
     }
 
     rebuild_breadcrumb(&state);
+    refresh_ls_view(&state);
+    update_status_bar(&state);
     load_css();
     window.present();
 }
@@ -451,22 +517,57 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
     for entry in entries.iter() {
         let tile_btn = Button::new();
         tile_btn.add_css_class("noterm-tile");
-        let h = GtkBox::new(Orientation::Horizontal, 6);
-        h.set_margin_top(2);
-        h.set_margin_bottom(2);
+        // Vertical layout: icon/thumbnail on top, name centered below.
+        let h = GtkBox::new(Orientation::Vertical, 4);
+        h.set_halign(gtk4::Align::Center);
+        h.set_margin_top(4);
+        h.set_margin_bottom(4);
         h.set_margin_start(6);
         h.set_margin_end(6);
 
-        let mode = state.borrow().mode;
-        let icon = icon_for_entry(mode, entry);
-        if !icon.is_empty() {
-            let icon_label = Label::new(Some(icon));
-            icon_label.add_css_class("noterm-icon");
-            h.append(&icon_label);
+        let (mode, icon_size) = {
+            let s = state.borrow();
+            (s.mode, s.icon_size)
+        };
+        // Icons mode + image file: show a scaled thumbnail.
+        if mode == RenderMode::Icons && is_image(&entry.path) {
+            let sz = icon_size as i32;
+            match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(&entry.path, sz, sz, true) {
+                Ok(pb) => {
+                    let pic = Picture::new();
+                    pic.set_width_request(sz);
+                    pic.set_height_request(sz);
+                    pic.set_halign(gtk4::Align::Center);
+                    pic.set_content_fit(gtk4::ContentFit::Contain);
+                    pic.set_pixbuf(Some(&pb));
+                    h.append(&pic);
+                }
+                Err(_) => {
+                    let icon_label = Label::new(None);
+                    let pt = icon_size * 3 / 4;
+                    icon_label.set_markup(&format!("<span font=\"{}\">🖼️</span>", pt));
+                    icon_label.set_halign(gtk4::Align::Center);
+                    icon_label.add_css_class("noterm-icon");
+                    h.append(&icon_label);
+                }
+            }
+        } else {
+            let icon = icon_for_entry(mode, entry);
+            if !icon.is_empty() {
+                let icon_label = Label::new(None);
+                let pt = icon_size * 3 / 4;
+                icon_label.set_markup(&format!("<span font=\"{}\">{}</span>", pt, icon));
+                icon_label.set_halign(gtk4::Align::Center);
+                icon_label.add_css_class("noterm-icon");
+                h.append(&icon_label);
+            }
         }
 
         let name_label = Label::new(Some(&entry.name));
-        name_label.set_xalign(0.0);
+        name_label.set_halign(gtk4::Align::Center);
+        name_label.set_xalign(0.5);
+        name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        name_label.set_max_width_chars(14);
         h.append(&name_label);
 
         tile_btn.set_child(Some(&h));
@@ -479,21 +580,12 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
         )));
 
         // Primary single-click: navigate (dir) or preview (file).
-        // Uses connect_clicked — the standard Button signal — which fires
-        // reliably on every click, unlike GestureClick which can be denied
-        // by the Button's own internal gesture on subsequent presses.
         {
             let state_click = state.clone();
             let entry_click = entry.clone();
             tile_btn.connect_clicked(move |_| {
                 if entry_click.kind == EntryKind::Directory {
-                    {
-                        let mut s = state_click.borrow_mut();
-                        s.cwd = entry_click.path.clone();
-                        s.cwd_label.set_text(&s.cwd.display().to_string());
-                    }
-                    rebuild_breadcrumb(&state_click);
-                    refresh_ls_view(&state_click);
+                    navigate_to(&state_click, entry_click.path.clone());
                 } else {
                     update_preview(&state_click, &entry_click.path);
                 }
@@ -509,6 +601,19 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
                 }
             });
             tile_btn.add_controller(click);
+        }
+        // Right-click: context menu.
+        {
+            let state_rc = state.clone();
+            let entry_rc = entry.clone();
+            let tile_ref = tile_btn.clone();
+            let right_click = gtk4::GestureClick::new();
+            right_click.set_button(3);
+            right_click.connect_pressed(move |gesture, _, _, _| {
+                gesture.set_state(gtk4::EventSequenceState::Claimed);
+                show_context_menu(&state_rc, &tile_ref, &entry_rc);
+            });
+            tile_btn.add_controller(right_click);
         }
 
         flow.insert(&tile_btn, -1);
@@ -633,13 +738,7 @@ fn rebuild_breadcrumb(state: &Rc<RefCell<UiState>>) {
         let state_btn = state.clone();
         btn.connect_clicked(move |_| {
             if target.is_dir() {
-                {
-                    let mut s = state_btn.borrow_mut();
-                    s.cwd = target.clone();
-                    s.cwd_label.set_text(&s.cwd.display().to_string());
-                }
-                rebuild_breadcrumb(&state_btn);
-                refresh_ls_view(&state_btn);
+                navigate_to(&state_btn, target.clone());
             }
         });
         box_widget.append(&btn);
@@ -955,6 +1054,36 @@ fn save_mode(mode: RenderMode) {
     }
 }
 
+fn noterm_icon_size_path() -> PathBuf {
+    rdm_common::config::config_dir().join("noterm-icon-size")
+}
+
+fn load_saved_icon_size() -> u32 {
+    let path = noterm_icon_size_path();
+    match std::fs::read_to_string(path) {
+        Ok(v) => match v.trim() {
+            "32" => 32,
+            "96" => 96,
+            "128" => 128,
+            _ => 64,
+        },
+        Err(_) => 64,
+    }
+}
+
+fn save_icon_size(size: u32) {
+    let path = noterm_icon_size_path();
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create config directory for NoTerm icon size: {}", e);
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&path, format!("{}\n", size)) {
+        log::warn!("Failed to save NoTerm icon size to {}: {}", path.display(), e);
+    }
+}
+
 fn show_preview_panel(state: &Rc<RefCell<UiState>>) {
     let s = state.borrow();
     let width = s.paned.width();
@@ -1049,6 +1178,7 @@ fn load_css() {
         .noterm-breadcrumb { border: none; background: transparent; padding: 2px 6px; }
         .noterm-breadcrumb:hover { background: alpha(@theme_surface, 0.9); }
         .noterm-meta { opacity: 0.75; font-size: 11px; }
+        .noterm-status { opacity: 0.7; font-size: 11px; padding: 2px 4px; }
         .noterm-icon {
             font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
         }
@@ -1060,6 +1190,324 @@ fn load_css() {
         &css,
         gtk4::STYLE_PROVIDER_PRIORITY_USER + 1,
     );
+}
+
+fn navigate_to(state: &Rc<RefCell<UiState>>, path: PathBuf) {
+    {
+        let mut s = state.borrow_mut();
+        let truncate_at = s.nav_pos + 1;
+        s.nav_history.truncate(truncate_at);
+        s.nav_history.push(path.clone());
+        s.nav_pos = s.nav_history.len() - 1;
+        s.cwd = path;
+        s.cwd_label.set_text(&s.cwd.display().to_string());
+        s.back_btn.set_sensitive(s.nav_pos > 0);
+        s.forward_btn.set_sensitive(false);
+    }
+    rebuild_breadcrumb(state);
+    refresh_ls_view(state);
+    update_status_bar(state);
+}
+
+fn navigate_back(state: &Rc<RefCell<UiState>>) {
+    {
+        let mut s = state.borrow_mut();
+        if s.nav_pos == 0 {
+            return;
+        }
+        s.nav_pos -= 1;
+        let path = s.nav_history[s.nav_pos].clone();
+        s.cwd = path;
+        s.cwd_label.set_text(&s.cwd.display().to_string());
+        s.back_btn.set_sensitive(s.nav_pos > 0);
+        s.forward_btn.set_sensitive(true);
+    }
+    rebuild_breadcrumb(state);
+    refresh_ls_view(state);
+    update_status_bar(state);
+}
+
+fn navigate_forward(state: &Rc<RefCell<UiState>>) {
+    {
+        let mut s = state.borrow_mut();
+        if s.nav_pos + 1 >= s.nav_history.len() {
+            return;
+        }
+        s.nav_pos += 1;
+        let path = s.nav_history[s.nav_pos].clone();
+        s.cwd = path;
+        s.cwd_label.set_text(&s.cwd.display().to_string());
+        s.back_btn.set_sensitive(true);
+        s.forward_btn.set_sensitive(s.nav_pos + 1 < s.nav_history.len());
+    }
+    rebuild_breadcrumb(state);
+    refresh_ls_view(state);
+    update_status_bar(state);
+}
+
+fn update_status_bar(state: &Rc<RefCell<UiState>>) {
+    let (cwd, show_hidden) = {
+        let s = state.borrow();
+        (s.cwd.clone(), s.show_hidden)
+    };
+    let mut total = 0usize;
+    let mut hidden = 0usize;
+    let mut dirs = 0usize;
+    let mut files = 0usize;
+    if let Ok(rd) = std::fs::read_dir(&cwd) {
+        for item in rd.flatten() {
+            total += 1;
+            let name = item.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                hidden += 1;
+            }
+            if let Ok(ft) = item.file_type() {
+                if ft.is_dir() {
+                    dirs += 1;
+                } else {
+                    files += 1;
+                }
+            }
+        }
+    }
+    let visible = if show_hidden { total } else { total.saturating_sub(hidden) };
+    let hidden_note = if hidden > 0 && !show_hidden {
+        format!("  •  {} hidden", hidden)
+    } else {
+        String::new()
+    };
+    state.borrow().status_label.set_text(&format!(
+        "{} items  ({} dirs, {} files){}",
+        visible, dirs, files, hidden_note
+    ));
+}
+
+fn show_context_menu(state: &Rc<RefCell<UiState>>, widget: &Button, entry: &LsEntry) {
+    let popover = Popover::new();
+    popover.set_parent(widget);
+    popover.set_has_arrow(true);
+
+    let vbox = GtkBox::new(Orientation::Vertical, 2);
+    vbox.set_margin_top(4);
+    vbox.set_margin_bottom(4);
+    vbox.set_margin_start(4);
+    vbox.set_margin_end(4);
+
+    let open_btn = Button::with_label("Open With System");
+    open_btn.add_css_class("flat");
+    {
+        let path = entry.path.clone();
+        let pop = popover.clone();
+        open_btn.connect_clicked(move |_| {
+            pop.popdown();
+            let _ = Command::new("xdg-open").arg(&path).spawn();
+        });
+    }
+    vbox.append(&open_btn);
+
+    let copy_btn = Button::with_label("Copy Path");
+    copy_btn.add_css_class("flat");
+    {
+        let path_str = entry.path.display().to_string();
+        let pop = popover.clone();
+        copy_btn.connect_clicked(move |_| {
+            pop.popdown();
+            if let Some(display) = gtk4::gdk::Display::default() {
+                display.clipboard().set_text(&path_str);
+            }
+        });
+    }
+    vbox.append(&copy_btn);
+
+    let rename_btn = Button::with_label("Rename");
+    rename_btn.add_css_class("flat");
+    {
+        let path = entry.path.clone();
+        let state_r = state.clone();
+        let pop = popover.clone();
+        rename_btn.connect_clicked(move |_| {
+            pop.popdown();
+            show_rename_dialog(&state_r, &path);
+        });
+    }
+    vbox.append(&rename_btn);
+
+    let new_folder_btn = Button::with_label("New Folder Here");
+    new_folder_btn.add_css_class("flat");
+    {
+        let state_r = state.clone();
+        let pop = popover.clone();
+        new_folder_btn.connect_clicked(move |_| {
+            pop.popdown();
+            show_new_folder_dialog(&state_r);
+        });
+    }
+    vbox.append(&new_folder_btn);
+
+    let trash_btn = Button::with_label("Move to Trash");
+    trash_btn.add_css_class("flat");
+    {
+        let path = entry.path.clone();
+        let state_r = state.clone();
+        let pop = popover.clone();
+        trash_btn.connect_clicked(move |_| {
+            pop.popdown();
+            let _ = Command::new("gio")
+                .args(["trash", &path.display().to_string()])
+                .spawn();
+            refresh_ls_view(&state_r);
+            update_status_bar(&state_r);
+        });
+    }
+    vbox.append(&trash_btn);
+
+    popover.set_child(Some(&vbox));
+    popover.popup();
+}
+
+fn show_rename_dialog(state: &Rc<RefCell<UiState>>, path: &Path) {
+    let dialog = gtk4::Window::builder()
+        .title("Rename")
+        .default_width(360)
+        .build();
+
+    let vbox = GtkBox::new(Orientation::Vertical, 12);
+    vbox.set_margin_top(16);
+    vbox.set_margin_bottom(16);
+    vbox.set_margin_start(16);
+    vbox.set_margin_end(16);
+
+    let lbl = Label::new(Some("New name:"));
+    lbl.set_xalign(0.0);
+    let name_entry = Entry::new();
+    let current_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    name_entry.set_text(&current_name);
+    name_entry.select_region(0, -1);
+
+    let btn_row = GtkBox::new(Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    let cancel_btn = Button::with_label("Cancel");
+    let ok_btn = Button::with_label("Rename");
+    ok_btn.add_css_class("suggested-action");
+    btn_row.append(&cancel_btn);
+    btn_row.append(&ok_btn);
+
+    vbox.append(&lbl);
+    vbox.append(&name_entry);
+    vbox.append(&btn_row);
+    dialog.set_child(Some(&vbox));
+
+    {
+        let d = dialog.clone();
+        cancel_btn.connect_clicked(move |_| d.close());
+    }
+    {
+        let path = path.to_path_buf();
+        let state_r = state.clone();
+        let d = dialog.clone();
+        let e = name_entry.clone();
+        ok_btn.connect_clicked(move |_| {
+            let new_name = e.text().to_string();
+            if !new_name.trim().is_empty() {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::rename(&path, parent.join(&new_name));
+                    refresh_ls_view(&state_r);
+                    update_status_bar(&state_r);
+                }
+            }
+            d.close();
+        });
+    }
+    {
+        let path = path.to_path_buf();
+        let state_r = state.clone();
+        let d = dialog.clone();
+        name_entry.connect_activate(move |e| {
+            let new_name = e.text().to_string();
+            if !new_name.trim().is_empty() {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::rename(&path, parent.join(&new_name));
+                    refresh_ls_view(&state_r);
+                    update_status_bar(&state_r);
+                }
+            }
+            d.close();
+        });
+    }
+
+    dialog.present();
+}
+
+fn show_new_folder_dialog(state: &Rc<RefCell<UiState>>) {
+    let cwd = state.borrow().cwd.clone();
+
+    let dialog = gtk4::Window::builder()
+        .title("New Folder")
+        .default_width(360)
+        .build();
+
+    let vbox = GtkBox::new(Orientation::Vertical, 12);
+    vbox.set_margin_top(16);
+    vbox.set_margin_bottom(16);
+    vbox.set_margin_start(16);
+    vbox.set_margin_end(16);
+
+    let lbl = Label::new(Some("Folder name:"));
+    lbl.set_xalign(0.0);
+    let name_entry = Entry::new();
+    name_entry.set_text("New Folder");
+    name_entry.select_region(0, -1);
+
+    let btn_row = GtkBox::new(Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    let cancel_btn = Button::with_label("Cancel");
+    let ok_btn = Button::with_label("Create");
+    ok_btn.add_css_class("suggested-action");
+    btn_row.append(&cancel_btn);
+    btn_row.append(&ok_btn);
+
+    vbox.append(&lbl);
+    vbox.append(&name_entry);
+    vbox.append(&btn_row);
+    dialog.set_child(Some(&vbox));
+
+    {
+        let d = dialog.clone();
+        cancel_btn.connect_clicked(move |_| d.close());
+    }
+    {
+        let state_r = state.clone();
+        let d = dialog.clone();
+        let e = name_entry.clone();
+        let cwd2 = cwd.clone();
+        ok_btn.connect_clicked(move |_| {
+            let name = e.text().to_string();
+            if !name.trim().is_empty() {
+                let _ = std::fs::create_dir_all(cwd2.join(&name));
+                refresh_ls_view(&state_r);
+                update_status_bar(&state_r);
+            }
+            d.close();
+        });
+    }
+    {
+        let state_r = state.clone();
+        let d = dialog.clone();
+        name_entry.connect_activate(move |e| {
+            let name = e.text().to_string();
+            if !name.trim().is_empty() {
+                let _ = std::fs::create_dir_all(cwd.join(&name));
+                refresh_ls_view(&state_r);
+                update_status_bar(&state_r);
+            }
+            d.close();
+        });
+    }
+
+    dialog.present();
 }
 
 #[cfg(test)]

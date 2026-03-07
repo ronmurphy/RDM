@@ -27,7 +27,7 @@ ok "cargo check passed"
 echo -e "${BOLD}"
 echo "  ╔══════════════════════════════════════╗"
 echo "  ║     RDM Desktop — Build All          ║"
-echo "  ║     Crate-by-crate rebuild + install  ║"
+echo "  ║  Crate-by-crate rebuild + install    ║"
 echo "  ╚══════════════════════════════════════╝"
 echo -e "${NC}"
 
