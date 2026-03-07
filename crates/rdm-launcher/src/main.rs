@@ -68,7 +68,8 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
     let mode = DisplayMode::from_str(&config.panel.taskbar_mode);
     let ui_mode = LauncherUiMode::from_str(&config.launcher.ui_mode);
     let launcher_pos = config.menu.launcher_position.clone();
-    let layout = rdm_common::theme::load_active_theme_layout();
+    let theme_name = config.appearance.theme.clone();
+    let layout = rdm_common::theme::load_theme_layout_for(&theme_name);
     let is_full = launcher_pos == "full";
     let config = Rc::new(RefCell::new(config.clone()));
 
@@ -136,7 +137,7 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
     let content = build_menu_content(app, &config, mode, is_full, &layout, ui_mode);
     window.set_child(Some(&content));
 
-    load_css();
+    load_css(&theme_name);
     window.present();
 }
 
@@ -145,19 +146,9 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
 type ColorCache = Rc<RefCell<HashMap<String, Option<(f64, f64, f64)>>>>;
 
 fn build_color_cache(entries: &[AppEntry], mode: DisplayMode) -> ColorCache {
-    let cache = Rc::new(RefCell::new(HashMap::new()));
-    if mode == DisplayMode::Icons {
-        return cache; // Icons mode doesn't use colors
-    }
-    for entry in entries {
-        if let Some(ref icon_name) = entry.icon {
-            if !cache.borrow().contains_key(icon_name) {
-                let color = extract_icon_color(icon_name);
-                cache.borrow_mut().insert(icon_name.clone(), color);
-            }
-        }
-    }
-    cache
+    let _ = entries;
+    let _ = mode;
+    Rc::new(RefCell::new(HashMap::new()))
 }
 
 // ─── Menu content ─────────────────────────────────────────────────
@@ -1655,7 +1646,16 @@ fn make_favorite_tile(
 // ─── Icon color extraction ────────────────────────────────────────
 
 fn apply_icon_color(label: &Label, icon_name: &str, cache: &ColorCache) {
-    let color = cache.borrow().get(icon_name).copied().flatten();
+    let color = {
+        let mut cache_ref = cache.borrow_mut();
+        if let Some(existing) = cache_ref.get(icon_name).copied().flatten() {
+            Some(existing)
+        } else {
+            let computed = extract_icon_color(icon_name);
+            cache_ref.insert(icon_name.to_string(), computed);
+            computed
+        }
+    };
     if let Some(color) = color {
         let css = format!(
             "color: rgb({},{},{});",
@@ -1772,9 +1772,9 @@ fn launch_app(exec: &str) {
 
 // ─── CSS ──────────────────────────────────────────────────────────
 
-fn load_css() {
+fn load_css(theme_name: &str) {
     let css = CssProvider::new();
-    css.load_from_data(&rdm_common::theme::load_theme_css());
+    css.load_from_data(&rdm_common::theme::load_theme_css_for(theme_name));
 
     // Priority 801 beats the user's ~/.config/gtk-4.0/gtk.css (loaded at 800)
     gtk4::style_context_add_provider_for_display(

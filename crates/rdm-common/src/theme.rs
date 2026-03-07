@@ -271,7 +271,7 @@ pub fn load_theme_layout_for(theme_name: &str) -> ThemeLayout {
 
 /// Load CSS for a specific theme name.
 /// Assembles: colors.css + style.css + overrides.css
-fn load_theme_css_for(theme_name: &str) -> String {
+pub fn load_theme_css_for(theme_name: &str) -> String {
     if let Some(css) = assemble_theme(theme_name) {
         return css;
     }
