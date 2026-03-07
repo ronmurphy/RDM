@@ -36,11 +36,21 @@ const WATCHER_XML: &str = r#"<node>
 enum SniEvent {
     ItemAdded { service: String, obj_path: String },
     ItemRemoved { key: String },
+    /// A new panel tray box was created (second/third monitor joining late).
+    BoxAdded { weak: glib::WeakRef<gtk4::Box> },
 }
 
+/// One registered SNI item: its proxy and the name-vanish watcher.
 struct SniItem {
-    button: gtk4::Button,
-    _proxy: gio::DBusProxy,
+    proxy: gio::DBusProxy,
+    _watch_id: Box<dyn std::any::Any>,
+}
+
+/// Per-monitor tray box with the buttons it currently shows.
+struct SniBox {
+    weak: glib::WeakRef<gtk4::Box>,
+    /// item key → button shown in this box
+    buttons: HashMap<String, gtk4::Button>,
 }
 
 thread_local! {
@@ -49,17 +59,29 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
     static SNI_INITIALIZED: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Sender for the SNI event channel — stored so subsequent monitor panels
+    /// can send BoxAdded events into the same loop.
+    static SNI_TX: RefCell<Option<async_channel::Sender<SniEvent>>> =
+        const { RefCell::new(None) };
 }
 
 /// Build and return a `gtk4::Box` that will populate itself with SNI icon
 /// buttons as apps register their tray items.  Safe to call once per monitor;
-/// the watcher is only registered the first time.
+/// the watcher is only registered the first time.  Subsequent calls register
+/// the new box so it also receives icons.
 pub fn setup_sni_tray() -> gtk4::Box {
     let sni_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
     sni_box.add_css_class("sni-tray");
 
-    // Only register the watcher once (multi-monitor guard).
+    // For monitors added after the first: register the new box via the
+    // existing channel so the async loop populates it with current items.
     if SNI_INITIALIZED.get() {
+        let weak = sni_box.downgrade();
+        SNI_TX.with(|cell| {
+            if let Some(tx) = cell.borrow().as_ref() {
+                let _ = tx.send_blocking(SniEvent::BoxAdded { weak });
+            }
+        });
         return sni_box;
     }
 
@@ -72,6 +94,9 @@ pub fn setup_sni_tray() -> gtk4::Box {
     };
 
     let (tx, rx) = async_channel::bounded::<SniEvent>(64);
+
+    // Store sender so subsequent monitor panels can join the same loop.
+    SNI_TX.with(|cell| *cell.borrow_mut() = Some(tx.clone()));
 
     // Shared watcher state (needs Send+Sync for register_object closures).
     let registered_items: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -261,47 +286,61 @@ pub fn setup_sni_tray() -> gtk4::Box {
 
     SNI_INITIALIZED.set(true);
 
-    // GTK side: receive events and manage icon buttons.
+    // GTK side: receive events and manage icon buttons across all monitor panels.
+    // `boxes` holds every panel's tray box (one per monitor).
+    // `items` holds the proxy + watcher for each registered SNI item.
+    let boxes: Rc<RefCell<Vec<SniBox>>> = Rc::new(RefCell::new(vec![SniBox {
+        weak: sni_box.downgrade(),
+        buttons: HashMap::new(),
+    }]));
     let items: Rc<RefCell<HashMap<String, SniItem>>> = Rc::new(RefCell::new(HashMap::new()));
     let conn_ev = conn.clone();
-    let sni_box_weak = sni_box.downgrade();
     let tx_remove = tx.clone();
 
     glib::spawn_future_local(async move {
         while let Ok(event) = rx.recv().await {
-            let Some(sni_box) = sni_box_weak.upgrade() else {
-                break;
-            };
             match event {
                 SniEvent::ItemAdded { service, obj_path } => {
                     let key = format!("{service}{obj_path}");
                     if items.borrow().contains_key(&key) {
                         continue;
                     }
-                    if let Some(item) = create_sni_item(&conn_ev, &service, &obj_path).await {
-                        sni_box.append(&item.button);
-                        items.borrow_mut().insert(key.clone(), item);
-                        // Watch for the service to vanish so we can clean up.
-                        let tx_w = tx_remove.clone();
-                        let key_w = key.clone();
-                        let watch_id = gio::bus_watch_name_on_connection(
-                            &conn_ev,
-                            &service,
-                            gio::BusNameWatcherFlags::NONE,
-                            |_, _, _| {},
-                            move |_, _| {
-                                let _ = tx_w.send_blocking(SniEvent::ItemRemoved {
-                                    key: key_w.clone(),
-                                });
-                            },
-                        );
-                        SNI_RESOURCES.with(|r| r.borrow_mut().push(Box::new(watch_id)));
+                    let Some((proxy, watch_id)) =
+                        create_sni_proxy(&conn_ev, &service, &obj_path, &tx_remove, &key).await
+                    else {
+                        continue;
+                    };
+                    // Add a button to every live panel box.
+                    let mut boxes_ref = boxes.borrow_mut();
+                    for sni_box in boxes_ref.iter_mut() {
+                        let Some(b) = sni_box.weak.upgrade() else { continue };
+                        let btn = make_sni_button(&proxy);
+                        b.append(&btn);
+                        sni_box.buttons.insert(key.clone(), btn);
                     }
+                    items.borrow_mut().insert(key, SniItem { proxy, _watch_id: watch_id });
                 }
                 SniEvent::ItemRemoved { key } => {
-                    if let Some(item) = items.borrow_mut().remove(&key) {
-                        sni_box.remove(&item.button);
+                    if items.borrow_mut().remove(&key).is_some() {
+                        for sni_box in boxes.borrow_mut().iter_mut() {
+                            if let Some(btn) = sni_box.buttons.remove(&key) {
+                                if let Some(b) = sni_box.weak.upgrade() {
+                                    b.remove(&btn);
+                                }
+                            }
+                        }
                     }
+                }
+                SniEvent::BoxAdded { weak } => {
+                    // A new monitor panel joined — populate it with existing items.
+                    let Some(b) = weak.upgrade() else { continue };
+                    let mut buttons = HashMap::new();
+                    for (key, item) in items.borrow().iter() {
+                        let btn = make_sni_button(&item.proxy);
+                        b.append(&btn);
+                        buttons.insert(key.clone(), btn);
+                    }
+                    boxes.borrow_mut().push(SniBox { weak, buttons });
                 }
             }
         }
@@ -326,12 +365,15 @@ fn normalize_sni_service(arg: &str, sender: &str) -> (String, String) {
     }
 }
 
-/// Create a proxy for an SNI item and return a button wired up to it.
-async fn create_sni_item(
+/// Create the D-Bus proxy for an SNI item and set up the name-vanish watcher.
+/// Returns `(proxy, watch_id)` on success.
+async fn create_sni_proxy(
     conn: &gio::DBusConnection,
     service: &str,
     obj_path: &str,
-) -> Option<SniItem> {
+    tx_remove: &async_channel::Sender<SniEvent>,
+    key: &str,
+) -> Option<(gio::DBusProxy, Box<dyn std::any::Any>)> {
     let proxy = gio::DBusProxy::new_future(
         conn,
         gio::DBusProxyFlags::NONE,
@@ -344,12 +386,30 @@ async fn create_sni_item(
     .map_err(|e| log::warn!("SNI: proxy for {service}{obj_path}: {e}"))
     .ok()?;
 
+    let tx_w = tx_remove.clone();
+    let key_w = key.to_string();
+    let watch_id = gio::bus_watch_name_on_connection(
+        conn,
+        service,
+        gio::BusNameWatcherFlags::NONE,
+        |_, _, _| {},
+        move |_, _| {
+            let _ = tx_w.send_blocking(SniEvent::ItemRemoved { key: key_w.clone() });
+        },
+    );
+
+    Some((proxy, Box::new(watch_id)))
+}
+
+/// Build a tray button wired up to an existing SNI proxy.
+/// Safe to call multiple times for the same proxy (one button per panel box).
+fn make_sni_button(proxy: &gio::DBusProxy) -> gtk4::Button {
     let btn = gtk4::Button::new();
     btn.set_has_frame(false);
     btn.add_css_class("tray-btn");
     btn.add_css_class("sni-item");
 
-    refresh_sni_icon(&btn, &proxy);
+    refresh_sni_icon(&btn, proxy);
 
     if let Some(title) = proxy
         .cached_property("Title")
@@ -375,15 +435,13 @@ async fn create_sni_item(
         );
     });
 
-    // Right-click → ContextMenu(x, y): the app draws its own popup menu.
-    // Capture phase so the gesture fires before the Button's internal handler.
+    // Right-click → ContextMenu(x, y).
     let proxy_r = proxy.clone();
     let gesture = gtk4::GestureClick::new();
     gesture.set_button(3);
     gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
     gesture.connect_pressed(move |g, _n, x, y| {
         g.set_state(gtk4::EventSequenceState::Claimed);
-        // Convert widget-local coords to root-window coords for better positioning.
         let (rx, ry) = g
             .widget()
             .and_then(|w| {
@@ -404,7 +462,7 @@ async fn create_sni_item(
     });
     btn.add_controller(gesture);
 
-    // Update icon when the item changes its properties.
+    // Update icon when the item's properties change.
     let btn_w = btn.downgrade();
     proxy.connect_local("g-properties-changed", false, move |vals| {
         let proxy: gio::DBusProxy = vals[0].get().unwrap();
@@ -414,10 +472,7 @@ async fn create_sni_item(
         None
     });
 
-    Some(SniItem {
-        button: btn,
-        _proxy: proxy,
-    })
+    btn
 }
 
 fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
