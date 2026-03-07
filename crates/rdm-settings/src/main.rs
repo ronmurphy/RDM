@@ -92,8 +92,8 @@ fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("RDM Settings")
-        .default_width(520)
-        .default_height(480)
+        .default_width(650)
+        .default_height(520)
         .resizable(true)
         .build();
 
@@ -205,26 +205,30 @@ fn build_appearance_page(
     config: &Rc<RefCell<RdmConfig>>,
     themes_state: &Rc<RefCell<Vec<ThemeMeta>>>,
 ) -> (GtkBox, Rc<dyn Fn()>) {
-    let page = GtkBox::new(Orientation::Vertical, 16);
+    let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
     page.set_margin_start(20);
     page.set_margin_end(20);
 
+    let grid = gtk4::Grid::new();
+    grid.set_row_spacing(8);
+    grid.set_column_spacing(12);
+    let mut row: i32 = 0;
+
     let header = Label::new(Some("Appearance"));
     header.add_css_class("settings-header");
     header.set_halign(gtk4::Align::Start);
-    page.append(&header);
+    grid.attach(&header, 0, row, 2, 1);
+    row += 1;
 
     // Theme selector
-    let theme_row = setting_row("Theme");
     let themes = themes_state.borrow().clone();
     let theme_names: Vec<String> = themes.iter().map(|t| t.display_name.clone()).collect();
     let theme_str_refs: Vec<&str> = theme_names.iter().map(|s| s.as_str()).collect();
     let theme_list = StringList::new(&theme_str_refs);
     let theme_dropdown = DropDown::new(Some(theme_list), gtk4::Expression::NONE);
 
-    // Set current selection
     let current = config.borrow().appearance.theme.clone();
     let selected_idx = themes.iter().position(|t| t.name == current).unwrap_or(0) as u32;
     theme_dropdown.set_selected(selected_idx);
@@ -236,8 +240,13 @@ fn build_appearance_page(
             cfg.borrow_mut().appearance.theme = theme.name.clone();
         }
     });
-    theme_row.append(&theme_dropdown);
-    page.append(&theme_row);
+
+    let lbl = Label::new(Some("Theme"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
+    grid.attach(&theme_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // Description of selected theme
     let desc = Label::new(None);
@@ -246,7 +255,8 @@ fn build_appearance_page(
     if let Some(theme) = themes.get(selected_idx as usize) {
         desc.set_text(&theme.description);
     }
-    page.append(&desc);
+    grid.attach(&desc, 0, row, 2, 1);
+    row += 1;
 
     let desc_for_handler = desc.clone();
     let themes_for_desc = themes_state.clone();
@@ -263,13 +273,17 @@ fn build_appearance_page(
     ));
     hint.add_css_class("settings-hint");
     hint.set_halign(gtk4::Align::Start);
-    hint.set_margin_top(12);
-    page.append(&hint);
+    hint.set_margin_top(8);
+    grid.attach(&hint, 0, row, 2, 1);
+    row += 1;
 
     let user_hint = Label::new(Some("Custom themes can be added to ~/.config/rdm/themes/"));
     user_hint.add_css_class("settings-hint");
     user_hint.set_halign(gtk4::Align::Start);
-    page.append(&user_hint);
+    grid.attach(&user_hint, 0, row, 2, 1);
+    let _ = row;
+
+    page.append(&grid);
 
     let dropdown_for_refresh = theme_dropdown.clone();
     let desc_for_refresh = desc.clone();
@@ -303,20 +317,29 @@ fn build_appearance_page(
 // ─── Panel Settings ──────────────────────────────────────────────
 
 fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
-    let page = GtkBox::new(Orientation::Vertical, 16);
+    let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
     page.set_margin_start(20);
     page.set_margin_end(20);
 
+    let grid = gtk4::Grid::new();
+    grid.set_row_spacing(8);
+    grid.set_column_spacing(12);
+    let mut row: i32 = 0;
+
     // Section header
     let header = Label::new(Some("Panel"));
     header.add_css_class("settings-header");
     header.set_halign(gtk4::Align::Start);
-    page.append(&header);
+    grid.attach(&header, 0, row, 2, 1);
+    row += 1;
 
     // Taskbar mode
-    let taskbar_row = setting_row("Taskbar Mode");
+    let lbl = Label::new(Some("Taskbar Mode"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let taskbar_modes = StringList::new(&["icons", "text", "nerd"]);
     let taskbar_dropdown = DropDown::new(Some(taskbar_modes), gtk4::Expression::NONE);
     let current = &config.borrow().panel.taskbar_mode;
@@ -335,11 +358,14 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         };
         cfg.borrow_mut().panel.taskbar_mode = mode.to_string();
     });
-    taskbar_row.append(&taskbar_dropdown);
-    page.append(&taskbar_row);
+    grid.attach(&taskbar_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // Panel position
-    let pos_row = setting_row("Panel Position");
+    let lbl = Label::new(Some("Panel Position"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let pos_modes = StringList::new(&["top", "bottom"]);
     let pos_dropdown = DropDown::new(Some(pos_modes), gtk4::Expression::NONE);
     pos_dropdown.set_selected(if config.borrow().panel.position == "bottom" {
@@ -352,11 +378,14 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         let pos = if dd.selected() == 1 { "bottom" } else { "top" };
         cfg.borrow_mut().panel.position = pos.to_string();
     });
-    pos_row.append(&pos_dropdown);
-    page.append(&pos_row);
+    grid.attach(&pos_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // Panel height
-    let height_row = setting_row("Panel Height");
+    let lbl = Label::new(Some("Panel Height"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let height_adj = gtk4::Adjustment::new(
         config.borrow().panel.height as f64,
         24.0,
@@ -370,23 +399,30 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     height_spin.connect_value_changed(move |spin| {
         cfg.borrow_mut().panel.height = spin.value() as i32;
     });
-    height_row.append(&height_spin);
-    page.append(&height_row);
+    grid.attach(&height_spin, 1, row, 1, 1);
+    row += 1;
 
     // Show clock
-    let clock_row = setting_row("Show Clock");
+    let lbl = Label::new(Some("Show Clock"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let clock_switch = Switch::new();
     clock_switch.set_active(config.borrow().panel.show_clock);
     clock_switch.set_valign(gtk4::Align::Center);
+    clock_switch.set_halign(gtk4::Align::Start);
     let cfg = config.clone();
     clock_switch.connect_active_notify(move |sw| {
         cfg.borrow_mut().panel.show_clock = sw.is_active();
     });
-    clock_row.append(&clock_switch);
-    page.append(&clock_row);
+    grid.attach(&clock_switch, 1, row, 1, 1);
+    row += 1;
 
     // Clock format
-    let fmt_row = setting_row("Clock Format");
+    let lbl = Label::new(Some("Clock Format"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let fmt_entry = Entry::new();
     fmt_entry.set_text(&config.borrow().panel.clock_format);
     fmt_entry.set_hexpand(true);
@@ -394,18 +430,22 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     fmt_entry.connect_changed(move |e| {
         cfg.borrow_mut().panel.clock_format = e.text().to_string();
     });
-    fmt_row.append(&fmt_entry);
-    page.append(&fmt_row);
+    grid.attach(&fmt_entry, 1, row, 1, 1);
+    row += 1;
 
     // ── Launcher section ──
     let launcher_header = Label::new(Some("Launcher"));
     launcher_header.add_css_class("settings-header");
     launcher_header.set_halign(gtk4::Align::Start);
-    launcher_header.set_margin_top(12);
-    page.append(&launcher_header);
+    launcher_header.set_margin_top(8);
+    grid.attach(&launcher_header, 0, row, 2, 1);
+    row += 1;
 
     // Launcher position
-    let lpos_row = setting_row("Launcher Position");
+    let lbl = Label::new(Some("Position"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let positions = StringList::new(&["center", "panel", "full"]);
     let lpos_dropdown = DropDown::new(Some(positions), gtk4::Expression::NONE);
     let current_lpos = &config.borrow().menu.launcher_position;
@@ -424,11 +464,14 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         };
         cfg.borrow_mut().menu.launcher_position = pos.to_string();
     });
-    lpos_row.append(&lpos_dropdown);
-    page.append(&lpos_row);
+    grid.attach(&lpos_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // Launcher UI mode
-    let lmode_row = setting_row("Launcher UI");
+    let lbl = Label::new(Some("UI Mode"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let ui_modes = StringList::new(&[
         "winxp_classic",
         "win11_grid",
@@ -456,28 +499,41 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
         };
         cfg.borrow_mut().launcher.ui_mode = mode.to_string();
     });
-    lmode_row.append(&lmode_dropdown);
-    page.append(&lmode_row);
+    grid.attach(&lmode_dropdown, 1, row, 1, 1);
+    let _ = row;
 
+    page.append(&grid);
     page
 }
 
 // ─── Wallpaper Settings ──────────────────────────────────────────
 
 fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWindow) -> GtkBox {
-    let page = GtkBox::new(Orientation::Vertical, 16);
+    let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
     page.set_margin_start(20);
     page.set_margin_end(20);
 
+    let grid = gtk4::Grid::new();
+    grid.set_row_spacing(8);
+    grid.set_column_spacing(12);
+    let mut row: i32 = 0;
+
     let header = Label::new(Some("Wallpaper"));
     header.add_css_class("settings-header");
     header.set_halign(gtk4::Align::Start);
-    page.append(&header);
+    grid.attach(&header, 0, row, 2, 1);
+    row += 1;
 
     // Current wallpaper path display + browse
-    let path_row = setting_row("Image");
+    let lbl = Label::new(Some("Image"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    lbl.set_valign(gtk4::Align::Center);
+    grid.attach(&lbl, 0, row, 1, 1);
+
+    let path_box = GtkBox::new(Orientation::Horizontal, 6);
     let wp_path = config.borrow().wallpaper.path.clone();
     let display_text = if wp_path.is_empty() {
         "(none — solid color)".to_string()
@@ -536,13 +592,17 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
         lbl.set_label("(none — solid color)");
     });
 
-    path_row.append(&path_label);
-    path_row.append(&browse_btn);
-    path_row.append(&clear_btn);
-    page.append(&path_row);
+    path_box.append(&path_label);
+    path_box.append(&browse_btn);
+    path_box.append(&clear_btn);
+    grid.attach(&path_box, 1, row, 1, 1);
+    row += 1;
 
     // Wallpaper mode
-    let mode_row = setting_row("Mode");
+    let lbl = Label::new(Some("Mode"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let modes = StringList::new(&["fill", "center", "stretch", "fit", "tile"]);
     let mode_dropdown = DropDown::new(Some(modes), gtk4::Expression::NONE);
     let idx = match config.borrow().wallpaper.mode.as_str() {
@@ -566,11 +626,14 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
         };
         cfg.borrow_mut().wallpaper.mode = mode.to_string();
     });
-    mode_row.append(&mode_dropdown);
-    page.append(&mode_row);
+    grid.attach(&mode_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // Background color
-    let color_row = setting_row("Background Color");
+    let lbl = Label::new(Some("Background Color"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
     let color_entry = Entry::new();
     color_entry.set_text(&config.borrow().wallpaper.color);
     color_entry.set_max_width_chars(10);
@@ -578,8 +641,8 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
     color_entry.connect_changed(move |e| {
         cfg.borrow_mut().wallpaper.color = e.text().to_string();
     });
-    color_row.append(&color_entry);
-    page.append(&color_row);
+    grid.attach(&color_entry, 1, row, 1, 1);
+    row += 1;
 
     // Preview hint
     let hint = Label::new(Some(
@@ -587,9 +650,11 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
     ));
     hint.add_css_class("settings-hint");
     hint.set_halign(gtk4::Align::Start);
-    hint.set_margin_top(12);
-    page.append(&hint);
+    hint.set_margin_top(4);
+    grid.attach(&hint, 0, row, 2, 1);
+    let _ = row;
 
+    page.append(&grid);
     page
 }
 
@@ -600,26 +665,32 @@ fn build_theme_editor_page(
     themes_state: Rc<RefCell<Vec<ThemeMeta>>>,
     refresh_appearance_themes: Rc<dyn Fn()>,
 ) -> GtkBox {
-    let page = GtkBox::new(Orientation::Vertical, 12);
+    let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
     page.set_margin_start(20);
     page.set_margin_end(20);
 
+    let settings_grid = gtk4::Grid::new();
+    settings_grid.set_row_spacing(8);
+    settings_grid.set_column_spacing(12);
+    let mut row: i32 = 0;
+
     let header = Label::new(Some("Theme Editor"));
     header.add_css_class("settings-header");
     header.set_halign(gtk4::Align::Start);
-    page.append(&header);
+    settings_grid.attach(&header, 0, row, 2, 1);
+    row += 1;
 
     let hint = Label::new(Some(
         "Pick a base theme, tweak colors, then save as a new theme.",
     ));
     hint.add_css_class("settings-hint");
     hint.set_halign(gtk4::Align::Start);
-    page.append(&hint);
+    settings_grid.attach(&hint, 0, row, 2, 1);
+    row += 1;
 
     // ── Base theme selector ──────────────────────────────────
-    let base_row = setting_row("Base Theme");
     let slugs: Vec<(String, String)> = themes_state
         .borrow()
         .iter()
@@ -634,16 +705,25 @@ fn build_theme_editor_page(
     let str_refs: Vec<&str> = display_names.iter().map(|s| s.as_str()).collect();
     let slug_list = StringList::new(&str_refs);
     let base_dropdown = DropDown::new(Some(slug_list), gtk4::Expression::NONE);
-    base_row.append(&base_dropdown);
-    page.append(&base_row);
+
+    let lbl = Label::new(Some("Base Theme"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    settings_grid.attach(&lbl, 0, row, 1, 1);
+    settings_grid.attach(&base_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // ── Theme name entry ─────────────────────────────────────
-    let name_row = setting_row("Theme Name");
     let name_entry = Entry::new();
     name_entry.set_placeholder_text(Some("my-custom-theme"));
     name_entry.set_hexpand(true);
-    name_row.append(&name_entry);
-    page.append(&name_row);
+
+    let lbl = Label::new(Some("Theme Name"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    settings_grid.attach(&lbl, 0, row, 1, 1);
+    settings_grid.attach(&name_entry, 1, row, 1, 1);
+    row += 1;
 
     // ── Layout profile controls ──────────────────────────────
     let theme_layout: Rc<RefCell<ThemeLayout>> = Rc::new(RefCell::new(ThemeLayout::default()));
@@ -651,15 +731,27 @@ fn build_theme_editor_page(
     let layout_header = Label::new(Some("Layout Profile"));
     layout_header.add_css_class("settings-header");
     layout_header.set_halign(gtk4::Align::Start);
-    layout_header.set_margin_top(6);
-    page.append(&layout_header);
+    layout_header.set_margin_top(4);
+    settings_grid.attach(&layout_header, 0, row, 2, 1);
+    row += 1;
 
-    let panel_launcher_row = setting_row("Panel: Launcher");
-    let panel_launcher_dd = DropDown::new(
-        Some(StringList::new(&["left", "center", "right"])),
-        gtk4::Expression::NONE,
-    );
-    panel_launcher_dd.set_selected(0);
+    // Helper macro-like closure for layout dropdowns
+    let attach_layout_row = |grid: &gtk4::Grid, row: &mut i32, label_text: &str, options: &[&str], default_idx: u32| -> DropDown {
+        let lbl = Label::new(Some(label_text));
+        lbl.set_halign(gtk4::Align::Start);
+        lbl.set_width_chars(16);
+        grid.attach(&lbl, 0, *row, 1, 1);
+        let dd = DropDown::new(
+            Some(StringList::new(options)),
+            gtk4::Expression::NONE,
+        );
+        dd.set_selected(default_idx);
+        grid.attach(&dd, 1, *row, 1, 1);
+        *row += 1;
+        dd
+    };
+
+    let panel_launcher_dd = attach_layout_row(&settings_grid, &mut row, "Panel: Launcher", &["left", "center", "right"], 0);
     {
         let layout = theme_layout.clone();
         panel_launcher_dd.connect_selected_notify(move |dd| {
@@ -671,15 +763,8 @@ fn build_theme_editor_page(
             layout.borrow_mut().panel.launcher = v.to_string();
         });
     }
-    panel_launcher_row.append(&panel_launcher_dd);
-    page.append(&panel_launcher_row);
 
-    let panel_taskbar_row = setting_row("Panel: Taskbar");
-    let panel_taskbar_dd = DropDown::new(
-        Some(StringList::new(&["left", "center", "right"])),
-        gtk4::Expression::NONE,
-    );
-    panel_taskbar_dd.set_selected(1);
+    let panel_taskbar_dd = attach_layout_row(&settings_grid, &mut row, "Panel: Taskbar", &["left", "center", "right"], 1);
     {
         let layout = theme_layout.clone();
         panel_taskbar_dd.connect_selected_notify(move |dd| {
@@ -691,15 +776,8 @@ fn build_theme_editor_page(
             layout.borrow_mut().panel.taskbar = v.to_string();
         });
     }
-    panel_taskbar_row.append(&panel_taskbar_dd);
-    page.append(&panel_taskbar_row);
 
-    let panel_clock_row = setting_row("Panel: Clock");
-    let panel_clock_dd = DropDown::new(
-        Some(StringList::new(&["left", "center", "right"])),
-        gtk4::Expression::NONE,
-    );
-    panel_clock_dd.set_selected(2);
+    let panel_clock_dd = attach_layout_row(&settings_grid, &mut row, "Panel: Clock", &["left", "center", "right"], 2);
     {
         let layout = theme_layout.clone();
         panel_clock_dd.connect_selected_notify(move |dd| {
@@ -711,15 +789,8 @@ fn build_theme_editor_page(
             layout.borrow_mut().panel.clock = v.to_string();
         });
     }
-    panel_clock_row.append(&panel_clock_dd);
-    page.append(&panel_clock_row);
 
-    let panel_sys_popup_row = setting_row("Panel: Sys Popup");
-    let panel_sys_popup_dd = DropDown::new(
-        Some(StringList::new(&["left", "center", "right"])),
-        gtk4::Expression::NONE,
-    );
-    panel_sys_popup_dd.set_selected(2);
+    let panel_sys_popup_dd = attach_layout_row(&settings_grid, &mut row, "Panel: Sys Popup", &["left", "center", "right"], 2);
     {
         let layout = theme_layout.clone();
         panel_sys_popup_dd.connect_selected_notify(move |dd| {
@@ -731,15 +802,8 @@ fn build_theme_editor_page(
             layout.borrow_mut().panel.sys_popup = v.to_string();
         });
     }
-    panel_sys_popup_row.append(&panel_sys_popup_dd);
-    page.append(&panel_sys_popup_row);
 
-    let panel_tray_row = setting_row("Panel: Tray");
-    let panel_tray_dd = DropDown::new(
-        Some(StringList::new(&["left", "center", "right"])),
-        gtk4::Expression::NONE,
-    );
-    panel_tray_dd.set_selected(2);
+    let panel_tray_dd = attach_layout_row(&settings_grid, &mut row, "Panel: Tray", &["left", "center", "right"], 2);
     {
         let layout = theme_layout.clone();
         panel_tray_dd.connect_selected_notify(move |dd| {
@@ -751,15 +815,8 @@ fn build_theme_editor_page(
             layout.borrow_mut().panel.tray = v.to_string();
         });
     }
-    panel_tray_row.append(&panel_tray_dd);
-    page.append(&panel_tray_row);
 
-    let launcher_fav_row = setting_row("Launcher: Favorites Side");
-    let launcher_fav_dd = DropDown::new(
-        Some(StringList::new(&["left", "right"])),
-        gtk4::Expression::NONE,
-    );
-    launcher_fav_dd.set_selected(1);
+    let launcher_fav_dd = attach_layout_row(&settings_grid, &mut row, "Launcher: Favorites", &["left", "right"], 1);
     {
         let layout = theme_layout.clone();
         launcher_fav_dd.connect_selected_notify(move |dd| {
@@ -767,15 +824,8 @@ fn build_theme_editor_page(
             layout.borrow_mut().launcher.favorites_side = v.to_string();
         });
     }
-    launcher_fav_row.append(&launcher_fav_dd);
-    page.append(&launcher_fav_row);
 
-    let launcher_settings_row = setting_row("Launcher: Settings Side");
-    let launcher_settings_dd = DropDown::new(
-        Some(StringList::new(&["left", "right"])),
-        gtk4::Expression::NONE,
-    );
-    launcher_settings_dd.set_selected(0);
+    let launcher_settings_dd = attach_layout_row(&settings_grid, &mut row, "Launcher: Settings", &["left", "right"], 0);
     {
         let layout = theme_layout.clone();
         launcher_settings_dd.connect_selected_notify(move |dd| {
@@ -783,15 +833,16 @@ fn build_theme_editor_page(
             layout.borrow_mut().launcher.settings_side = v.to_string();
         });
     }
-    launcher_settings_row.append(&launcher_settings_dd);
-    page.append(&launcher_settings_row);
 
     let layout_hint = Label::new(Some(
-        "These layout settings are saved with the theme and loaded at startup.",
+        "Layout settings are saved with the theme and loaded at startup.",
     ));
     layout_hint.add_css_class("settings-hint");
     layout_hint.set_halign(gtk4::Align::Start);
-    page.append(&layout_hint);
+    settings_grid.attach(&layout_hint, 0, row, 2, 1);
+    let _ = row;
+
+    page.append(&settings_grid);
 
     // ── Scrollable color swatch grid ─────────────────────────
     let scroll = gtk4::ScrolledWindow::new();
@@ -1026,23 +1077,30 @@ fn build_theme_editor_page(
 }
 
 fn build_diagnostics_page() -> GtkBox {
-    let page = GtkBox::new(Orientation::Vertical, 8);
+    let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(16);
     page.set_margin_bottom(16);
     page.set_margin_start(20);
     page.set_margin_end(20);
 
+    let grid = gtk4::Grid::new();
+    grid.set_row_spacing(6);
+    grid.set_column_spacing(12);
+    let mut grow: i32 = 0;
+
     let header = Label::new(Some("Diagnostics"));
     header.add_css_class("settings-header");
     header.set_halign(gtk4::Align::Start);
-    page.append(&header);
+    grid.attach(&header, 0, grow, 4, 1);
+    grow += 1;
 
     let hint = Label::new(Some(
         "Check dependency health and view session logs. Use Refresh to reload.",
     ));
     hint.add_css_class("settings-hint");
     hint.set_halign(gtk4::Align::Start);
-    page.append(&hint);
+    grid.attach(&hint, 0, grow, 4, 1);
+    grow += 1;
 
     // --- Dependencies: compact two-column grid ---
     let deps = [
@@ -1057,37 +1115,38 @@ fn build_diagnostics_page() -> GtkBox {
         "wl-copy",
     ];
 
-    let deps_grid = gtk4::Grid::new();
-    deps_grid.set_row_spacing(2);
-    deps_grid.set_column_spacing(16);
     let mut dep_rows: Vec<(String, Label)> = Vec::new();
     let cols = 2;
     for (i, dep) in deps.iter().enumerate() {
         let col = (i % cols) as i32;
-        let row = (i / cols) as i32;
+        let dep_row = grow + (i / cols) as i32;
         let name = Label::new(Some(dep));
         name.set_width_chars(12);
         name.set_xalign(0.0);
         let status = Label::new(None);
         status.set_xalign(0.0);
-        deps_grid.attach(&name, col * 2, row, 1, 1);
-        deps_grid.attach(&status, col * 2 + 1, row, 1, 1);
+        grid.attach(&name, col * 2, dep_row, 1, 1);
+        grid.attach(&status, col * 2 + 1, dep_row, 1, 1);
         dep_rows.push((dep.to_string(), status));
     }
-    page.append(&deps_grid);
+    grow += ((deps.len() + cols - 1) / cols) as i32;
 
     // --- Session Log ---
     let log_header = Label::new(Some("Session Log"));
     log_header.add_css_class("settings-header");
     log_header.set_halign(gtk4::Align::Start);
     log_header.set_margin_top(4);
-    page.append(&log_header);
+    grid.attach(&log_header, 0, grow, 4, 1);
+    grow += 1;
 
     let log_path = rdm_common::config::config_dir().join("rdm.log");
     let log_path_label = Label::new(Some(&format!("Path: {}", log_path.display())));
     log_path_label.add_css_class("settings-hint");
     log_path_label.set_halign(gtk4::Align::Start);
-    page.append(&log_path_label);
+    grid.attach(&log_path_label, 0, grow, 4, 1);
+    let _ = grow;
+
+    page.append(&grid);
 
     let log_scroll = gtk4::ScrolledWindow::new();
     log_scroll.set_vexpand(false);
@@ -1225,16 +1284,6 @@ fn open_color_picker(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
-
-fn setting_row(label_text: &str) -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 12);
-    row.set_margin_bottom(4);
-    let label = Label::new(Some(label_text));
-    label.set_halign(gtk4::Align::Start);
-    label.set_width_chars(16);
-    row.append(&label);
-    row
-}
 
 // ─── Display Arrangement Drawing ─────────────────────────────────
 
@@ -1746,11 +1795,20 @@ fn build_display_section(
     name_label.set_halign(gtk4::Align::Start);
     container.append(&name_label);
 
+    let grid = gtk4::Grid::new();
+    grid.set_row_spacing(6);
+    grid.set_column_spacing(12);
+    let mut row: i32 = 0;
+
     // --- Enable/Disable switch ---
-    let enable_row = setting_row("Enabled");
+    let lbl = Label::new(Some("Enabled"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(14);
+    grid.attach(&lbl, 0, row, 1, 1);
     let enable_switch = Switch::new();
     enable_switch.set_active(config.borrow().displays[index].enabled);
     enable_switch.set_valign(gtk4::Align::Center);
+    enable_switch.set_halign(gtk4::Align::Start);
     let cfg = config.clone();
     let arr = arrangement.clone();
     let da = drawing_area.clone();
@@ -1759,11 +1817,10 @@ fn build_display_section(
         arr.borrow_mut().rects[index].enabled = sw.is_active();
         da.queue_draw();
     });
-    enable_row.append(&enable_switch);
-    container.append(&enable_row);
+    grid.attach(&enable_switch, 1, row, 1, 1);
+    row += 1;
 
     // --- Resolution dropdown ---
-    // Collect unique resolutions
     let mut resolutions: Vec<(u32, u32)> = Vec::new();
     for m in &info.modes {
         let res = (m.width, m.height);
@@ -1778,11 +1835,13 @@ fn build_display_section(
         .collect();
     let res_str_refs: Vec<&str> = res_strings.iter().map(|s| s.as_str()).collect();
 
-    let res_row = setting_row("Resolution");
+    let lbl = Label::new(Some("Resolution"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(14);
+    grid.attach(&lbl, 0, row, 1, 1);
     let res_list = StringList::new(&res_str_refs);
     let res_dropdown = DropDown::new(Some(res_list), gtk4::Expression::NONE);
 
-    // Find current resolution from saved mode
     let current_mode = config.borrow().displays[index].mode.clone();
     let current_res = current_mode.split('@').next().unwrap_or("").to_string();
     let res_idx = res_strings
@@ -1790,11 +1849,10 @@ fn build_display_section(
         .position(|s| *s == current_res)
         .unwrap_or(0) as u32;
     res_dropdown.set_selected(res_idx);
+    grid.attach(&res_dropdown, 1, row, 1, 1);
+    row += 1;
 
     // --- Refresh rate dropdown ---
-    let rate_row = setting_row("Refresh Rate");
-
-    // Get rates for the currently selected resolution
     let selected_res = resolutions.get(res_idx as usize).copied().unwrap_or((0, 0));
     let rates: Vec<f64> = info
         .modes
@@ -1805,22 +1863,27 @@ fn build_display_section(
     let rate_strings: Vec<String> = rates.iter().map(|r| format!("{:.0} Hz", r)).collect();
     let rate_str_refs: Vec<&str> = rate_strings.iter().map(|s| s.as_str()).collect();
 
+    let lbl = Label::new(Some("Refresh Rate"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(14);
+    grid.attach(&lbl, 0, row, 1, 1);
     let rate_list = StringList::new(&rate_str_refs);
     let rate_dropdown = DropDown::new(Some(rate_list), gtk4::Expression::NONE);
 
-    // Find current rate
     let current_rate_str = current_mode.split('@').nth(1).unwrap_or("").to_string();
     let rate_idx = rates
         .iter()
         .position(|r| format!("{:.0}", r) == current_rate_str)
         .unwrap_or(0) as u32;
     rate_dropdown.set_selected(rate_idx);
+    grid.attach(&rate_dropdown, 1, row, 1, 1);
+    row += 1;
 
-    // Store info we need in closures for resolution/rate linking
+    // Store info for closures
     let modes_for_res = info.modes.clone();
     let resolutions_for_res = resolutions.clone();
 
-    // When resolution changes, rebuild the rate dropdown options and update config
+    // When resolution changes, rebuild rate dropdown and update config
     let cfg = config.clone();
     let rate_dd = rate_dropdown.clone();
     let modes_clone = modes_for_res.clone();
@@ -1830,7 +1893,6 @@ fn build_display_section(
     res_dropdown.connect_selected_notify(move |dd| {
         let sel = dd.selected() as usize;
         if let Some(&(w, h)) = res_clone.get(sel) {
-            // Rebuild rate list for this resolution
             let new_rates: Vec<f64> = modes_clone
                 .iter()
                 .filter(|m| m.width == w && m.height == h)
@@ -1843,11 +1905,9 @@ fn build_display_section(
             rate_dd.set_model(Some(&new_list));
             rate_dd.set_selected(0);
 
-            // Update config with the first available rate
             let rate = new_rates.first().copied().unwrap_or(60.0);
             cfg.borrow_mut().displays[index].mode = format!("{}x{}@{:.0}", w, h, rate);
 
-            // Update arrangement rect dimensions
             arr.borrow_mut().rects[index].width = w;
             arr.borrow_mut().rects[index].height = h;
             da.queue_draw();
@@ -1874,14 +1934,13 @@ fn build_display_section(
         }
     });
 
-    res_row.append(&res_dropdown);
-    container.append(&res_row);
-
-    rate_row.append(&rate_dropdown);
-    container.append(&rate_row);
-
     // --- Position X, Y ---
-    let pos_row = setting_row("Position");
+    let lbl = Label::new(Some("Position"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(14);
+    grid.attach(&lbl, 0, row, 1, 1);
+
+    let pos_box = GtkBox::new(Orientation::Horizontal, 6);
     let current_pos = config.borrow().displays[index].position.clone();
     let pos_parts: Vec<i32> = current_pos
         .split(',')
@@ -1891,7 +1950,7 @@ fn build_display_section(
     let pos_y = pos_parts.get(1).copied().unwrap_or(0);
 
     let x_label = Label::new(Some("X:"));
-    pos_row.append(&x_label);
+    pos_box.append(&x_label);
     let x_adj = gtk4::Adjustment::new(pos_x as f64, -8192.0, 8192.0, 1.0, 10.0, 0.0);
     let x_spin = gtk4::SpinButton::new(Some(&x_adj), 1.0, 0);
     x_spin.set_width_chars(6);
@@ -1901,7 +1960,7 @@ fn build_display_section(
     let y_spin = gtk4::SpinButton::new(Some(&y_adj), 1.0, 0);
     y_spin.set_width_chars(6);
 
-    // X spinbutton handler: update config + arrangement
+    // X spinbutton handler
     let cfg = config.clone();
     let arr = arrangement.clone();
     let da = drawing_area.clone();
@@ -1917,7 +1976,7 @@ fn build_display_section(
         da.queue_draw();
     });
 
-    // Y spinbutton handler: update config + arrangement
+    // Y spinbutton handler
     let cfg = config.clone();
     let arr = arrangement.clone();
     let da = drawing_area.clone();
@@ -1933,13 +1992,17 @@ fn build_display_section(
         da.queue_draw();
     });
 
-    pos_row.append(&x_spin);
-    pos_row.append(&y_label);
-    pos_row.append(&y_spin);
-    container.append(&pos_row);
+    pos_box.append(&x_spin);
+    pos_box.append(&y_label);
+    pos_box.append(&y_spin);
+    grid.attach(&pos_box, 1, row, 1, 1);
+    row += 1;
 
     // --- Scale ---
-    let scale_row = setting_row("Scale");
+    let lbl = Label::new(Some("Scale"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(14);
+    grid.attach(&lbl, 0, row, 1, 1);
     let scale_adj = gtk4::Adjustment::new(
         config.borrow().displays[index].scale,
         0.5,
@@ -1953,11 +2016,14 @@ fn build_display_section(
     scale_spin.connect_value_changed(move |spin| {
         cfg.borrow_mut().displays[index].scale = spin.value();
     });
-    scale_row.append(&scale_spin);
-    container.append(&scale_row);
+    grid.attach(&scale_spin, 1, row, 1, 1);
+    row += 1;
 
     // --- Transform ---
-    let transform_row = setting_row("Rotation");
+    let lbl = Label::new(Some("Rotation"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(14);
+    grid.attach(&lbl, 0, row, 1, 1);
     let transforms = StringList::new(&[
         "normal",
         "90",
@@ -1997,8 +2063,10 @@ fn build_display_section(
         };
         cfg.borrow_mut().displays[index].transform = transform.to_string();
     });
-    transform_row.append(&transform_dropdown);
-    container.append(&transform_row);
+    grid.attach(&transform_dropdown, 1, row, 1, 1);
+    let _ = row;
+
+    container.append(&grid);
 
     (x_spin, y_spin)
 }
