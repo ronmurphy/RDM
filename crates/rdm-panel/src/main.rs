@@ -1,5 +1,6 @@
 mod clock;
 mod dbusmenu;
+mod process_popup;
 mod sni;
 mod taskbar;
 mod toplevel;
@@ -276,12 +277,14 @@ fn build_panel_window(
     } else {
         None
     };
+    let task_popup_widget = process_popup::build_task_popup_widget();
 
     // Right: unified tray area — SNI app icons on the left, battery/power on the right.
     let sni_tray = sni::setup_sni_tray();
     let tray = tray::setup_tray(app, mode);
     let tray_area = gtk4::Box::new(Orientation::Horizontal, 0);
     tray_area.add_css_class("tray-area");
+    tray_area.append(&task_popup_widget);
     tray_area.append(&sni_tray);
     tray_area.append(&tray);
 
