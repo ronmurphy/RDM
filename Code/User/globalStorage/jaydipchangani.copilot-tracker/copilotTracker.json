@@ -1,0 +1,13 @@
+{
+    "username": "Unknown",
+    "06-03-2026": {
+        "copilotUsage": "00:00:00",
+        "totalUsageTime": "00:00:00",
+        "totalSuggestions": 0,
+        "acceptedSuggestions": 0,
+        "rejectedSuggestions": 0,
+        "totalChatMessages": 52,
+        "acceptedChatResponses": 0,
+        "rejectedChatResponses": 52
+    }
+}

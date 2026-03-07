@@ -47,6 +47,7 @@ fn main() {
 
     let app = Application::builder()
         .application_id("org.rdm.panel")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     let cfg = config.clone();

@@ -1,20 +1,56 @@
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Label};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use std::env;
 
 fn main() {
     env_logger::init();
     log::info!("Starting RDM Watermark");
+
+    if !is_rdm_session() {
+        log::warn!(
+            "Not starting rdm-watermark: non-RDM desktop detected \
+             (RDM_SESSION={:?}, XDG_SESSION_TYPE={:?}, XDG_CURRENT_DESKTOP={:?})",
+            env::var("RDM_SESSION").ok(),
+            env::var("XDG_SESSION_TYPE").ok(),
+            env::var("XDG_CURRENT_DESKTOP").ok(),
+        );
+        return;
+    }
 
     let version = rdm_common::build_version_string();
     log::info!("Version: {}", version);
 
     let app = Application::builder()
         .application_id("org.rdm.watermark")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     app.connect_activate(move |app| build_watermark(app, &version));
     app.run();
+}
+
+fn is_rdm_session() -> bool {
+    let has_session_marker = env::var("RDM_SESSION")
+        .ok()
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    let is_wayland = env::var("XDG_SESSION_TYPE")
+        .ok()
+        .map(|v| v.trim().eq_ignore_ascii_case("wayland"))
+        .unwrap_or(false);
+
+    let has_rdm_desktop_marker = ["XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION"]
+        .iter()
+        .any(|name| {
+            env::var(name)
+                .ok()
+                .map(|v| v.split(':').any(|p| p.trim().eq_ignore_ascii_case("rdm")))
+                .unwrap_or(false)
+        });
+
+    has_session_marker && is_wayland && has_rdm_desktop_marker
 }
 
 fn build_watermark(app: &Application, version: &str) {

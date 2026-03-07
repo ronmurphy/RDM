@@ -58,7 +58,18 @@ impl Default for SessionConfig {
 struct ManagedProcess {
     entry: AutostartEntry,
     child: Option<Child>,
+    /// When this process was last spawned (for fast-fail detection).
+    last_start: Option<std::time::Instant>,
+    /// How many consecutive fast-fails have occurred.
+    consecutive_fast_fails: u32,
+    /// Do not restart before this instant (backoff hold).
+    restart_hold_until: Option<std::time::Instant>,
 }
+
+/// A process is a "fast fail" if it exits within this many seconds of starting.
+const FAST_FAIL_SECS: u64 = 5;
+/// Maximum backoff delay in seconds (caps exponential growth).
+const MAX_BACKOFF_SECS: u64 = 60;
 
 #[tokio::main]
 async fn main() {
@@ -104,17 +115,65 @@ async fn main() {
             continue;
         }
 
-        // Normal monitoring — restart crashed processes
+        // Normal monitoring — restart crashed processes (with backoff)
+        let now = std::time::Instant::now();
         for proc in processes.iter_mut() {
+            // If we're in a backoff hold, check whether we can restart yet.
+            if proc.child.is_none() {
+                if let Some(hold_until) = proc.restart_hold_until {
+                    if now >= hold_until {
+                        proc.restart_hold_until = None;
+                        if proc.entry.restart {
+                            log::info!("Restarting {} (backoff elapsed)", proc.entry.name);
+                            proc.child = spawn_process(&proc.entry);
+                            proc.last_start = Some(std::time::Instant::now());
+                        }
+                    }
+                }
+                continue;
+            }
+
             if let Some(ref mut child) = proc.child {
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        log::warn!("{} exited with status: {}", proc.entry.name, status);
-                        if proc.entry.restart {
+                        let uptime_secs = proc
+                            .last_start
+                            .map(|t| t.elapsed().as_secs())
+                            .unwrap_or(u64::MAX);
+                        log::warn!(
+                            "{} exited with status: {} (uptime: {}s)",
+                            proc.entry.name,
+                            status,
+                            uptime_secs
+                        );
+                        proc.child = None;
+
+                        if !proc.entry.restart {
+                            continue;
+                        }
+
+                        if uptime_secs < FAST_FAIL_SECS {
+                            proc.consecutive_fast_fails += 1;
+                            let backoff_secs = std::cmp::min(
+                                2u64.saturating_pow(proc.consecutive_fast_fails),
+                                MAX_BACKOFF_SECS,
+                            );
+                            log::warn!(
+                                "{} fast-failed {} time(s); backing off {}s before restart",
+                                proc.entry.name,
+                                proc.consecutive_fast_fails,
+                                backoff_secs,
+                            );
+                            proc.restart_hold_until = Some(
+                                std::time::Instant::now()
+                                    + std::time::Duration::from_secs(backoff_secs),
+                            );
+                        } else {
+                            // Healthy run — reset the fast-fail counter and restart immediately.
+                            proc.consecutive_fast_fails = 0;
                             log::info!("Restarting: {}", proc.entry.name);
                             proc.child = spawn_process(&proc.entry);
-                        } else {
-                            proc.child = None;
+                            proc.last_start = Some(std::time::Instant::now());
                         }
                     }
                     Ok(None) => {} // Still running
@@ -156,6 +215,9 @@ fn start_all(config: &SessionConfig) -> Vec<ManagedProcess> {
         processes.push(ManagedProcess {
             entry: entry.clone(),
             child,
+            last_start: Some(std::time::Instant::now()),
+            consecutive_fast_fails: 0,
+            restart_hold_until: None,
         });
     }
     processes

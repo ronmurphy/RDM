@@ -278,7 +278,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
                     if items.borrow().contains_key(&key) {
                         continue;
                     }
-                    if let Some(item) = create_sni_item(&conn_ev, &service, &obj_path) {
+                    if let Some(item) = create_sni_item(&conn_ev, &service, &obj_path).await {
                         sni_box.append(&item.button);
                         items.borrow_mut().insert(key.clone(), item);
                         // Watch for the service to vanish so we can clean up.
@@ -327,20 +327,20 @@ fn normalize_sni_service(arg: &str, sender: &str) -> (String, String) {
 }
 
 /// Create a proxy for an SNI item and return a button wired up to it.
-fn create_sni_item(
+async fn create_sni_item(
     conn: &gio::DBusConnection,
     service: &str,
     obj_path: &str,
 ) -> Option<SniItem> {
-    let proxy = gio::DBusProxy::new_sync(
+    let proxy = gio::DBusProxy::new_future(
         conn,
         gio::DBusProxyFlags::NONE,
         None,
         Some(service),
         obj_path,
         "org.kde.StatusNotifierItem",
-        gio::Cancellable::NONE,
     )
+    .await
     .map_err(|e| log::warn!("SNI: proxy for {service}{obj_path}: {e}"))
     .ok()?;
 
