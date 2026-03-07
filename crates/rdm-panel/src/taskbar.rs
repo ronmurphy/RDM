@@ -262,10 +262,10 @@ fn create_widget(
         btn.add_css_class("active");
     }
 
-    // Left click: activate
+    // Left click: toggle (activate ↔ minimize)
     let tx = action_tx.clone();
     btn.connect_clicked(move |_| {
-        let _ = tx.send(ToplevelAction::Activate(id));
+        let _ = tx.send(ToplevelAction::Toggle(id));
     });
 
     // Middle click: close

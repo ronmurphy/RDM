@@ -27,6 +27,8 @@ pub struct ToplevelInfo {
 pub enum ToplevelAction {
     Activate(u32),
     Close(u32),
+    /// Toggle: if activated → minimize; if minimized/unfocused → activate + unminimize
+    Toggle(u32),
 }
 
 /// Snapshot of all toplevels for the GTK side to consume
@@ -97,6 +99,28 @@ impl WaylandState {
                 ToplevelAction::Close(id) => {
                     if let Some(handle) = self.id_to_handle.get(&id) {
                         handle.close();
+                    }
+                }
+                ToplevelAction::Toggle(id) => {
+                    if let Some(handle_state) = self.handles.get(&id) {
+                        let is_activated = handle_state.has_state(
+                            zwlr_foreign_toplevel_handle_v1::State::Activated,
+                        );
+                        let is_minimized = handle_state.has_state(
+                            zwlr_foreign_toplevel_handle_v1::State::Minimized,
+                        );
+                        if let Some(handle) = self.id_to_handle.get(&id) {
+                            if is_activated && !is_minimized {
+                                // Currently focused — minimize it
+                                handle.set_minimized();
+                            } else {
+                                // Not focused or minimized — bring it up
+                                handle.unset_minimized();
+                                if let Some(seat) = &self.seat {
+                                    handle.activate(seat);
+                                }
+                            }
+                        }
                     }
                 }
             }

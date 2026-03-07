@@ -139,9 +139,18 @@ fn build_ui(app: &Application) {
     let sep = gtk4::Separator::new(Orientation::Vertical);
     content.append(&sep);
 
+    // Wrap the stack in a ScrolledWindow so pages scroll if they exceed the window height
+    let stack_scroll = gtk4::ScrolledWindow::new();
+    stack_scroll.set_hscrollbar_policy(gtk4::PolicyType::Never);
+    stack_scroll.set_vscrollbar_policy(gtk4::PolicyType::Automatic);
+    stack_scroll.set_propagate_natural_height(true);
+    stack_scroll.set_max_content_height(600);
     stack.set_hexpand(true);
     stack.set_vexpand(true);
-    content.append(&stack);
+    stack_scroll.set_child(Some(&stack));
+    stack_scroll.set_hexpand(true);
+    stack_scroll.set_vexpand(true);
+    content.append(&stack_scroll);
 
     main_box.append(&content);
 
@@ -1017,9 +1026,9 @@ fn build_theme_editor_page(
 }
 
 fn build_diagnostics_page() -> GtkBox {
-    let page = GtkBox::new(Orientation::Vertical, 12);
-    page.set_margin_top(20);
-    page.set_margin_bottom(20);
+    let page = GtkBox::new(Orientation::Vertical, 8);
+    page.set_margin_top(16);
+    page.set_margin_bottom(16);
     page.set_margin_start(20);
     page.set_margin_end(20);
 
@@ -1035,6 +1044,7 @@ fn build_diagnostics_page() -> GtkBox {
     hint.set_halign(gtk4::Align::Start);
     page.append(&hint);
 
+    // --- Dependencies: compact two-column grid ---
     let deps = [
         "labwc",
         "swaybg",
@@ -1047,26 +1057,30 @@ fn build_diagnostics_page() -> GtkBox {
         "wl-copy",
     ];
 
-    let deps_box = GtkBox::new(Orientation::Vertical, 6);
+    let deps_grid = gtk4::Grid::new();
+    deps_grid.set_row_spacing(2);
+    deps_grid.set_column_spacing(16);
     let mut dep_rows: Vec<(String, Label)> = Vec::new();
-    for dep in deps {
-        let row = GtkBox::new(Orientation::Horizontal, 8);
+    let cols = 2;
+    for (i, dep) in deps.iter().enumerate() {
+        let col = (i % cols) as i32;
+        let row = (i / cols) as i32;
         let name = Label::new(Some(dep));
         name.set_width_chars(12);
         name.set_xalign(0.0);
         let status = Label::new(None);
         status.set_xalign(0.0);
-        row.append(&name);
-        row.append(&status);
-        deps_box.append(&row);
+        deps_grid.attach(&name, col * 2, row, 1, 1);
+        deps_grid.attach(&status, col * 2 + 1, row, 1, 1);
         dep_rows.push((dep.to_string(), status));
     }
-    page.append(&deps_box);
+    page.append(&deps_grid);
 
+    // --- Session Log ---
     let log_header = Label::new(Some("Session Log"));
     log_header.add_css_class("settings-header");
     log_header.set_halign(gtk4::Align::Start);
-    log_header.set_margin_top(8);
+    log_header.set_margin_top(4);
     page.append(&log_header);
 
     let log_path = rdm_common::config::config_dir().join("rdm.log");
@@ -1076,9 +1090,10 @@ fn build_diagnostics_page() -> GtkBox {
     page.append(&log_path_label);
 
     let log_scroll = gtk4::ScrolledWindow::new();
-    log_scroll.set_vexpand(true);
+    log_scroll.set_vexpand(false);
     log_scroll.set_hexpand(true);
-    log_scroll.set_min_content_height(220);
+    log_scroll.set_height_request(180);
+    log_scroll.set_propagate_natural_height(false);
     let log_view = TextView::new();
     log_view.set_editable(false);
     log_view.set_cursor_visible(false);
