@@ -15,6 +15,7 @@ clock_format = "%H:%M  %b %d"
 [launcher]
 width = 500
 height = 400
+ui_mode = "winxp_classic"
 
 [snap]
 edge_threshold = 20

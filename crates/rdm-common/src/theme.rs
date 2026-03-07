@@ -42,6 +42,8 @@ pub struct PanelLayout {
     #[serde(default = "default_right")]
     pub clock: String,
     #[serde(default = "default_right")]
+    pub sys_popup: String,
+    #[serde(default = "default_right")]
     pub tray: String,
 }
 
@@ -91,6 +93,7 @@ impl Default for PanelLayout {
             launcher: default_left(),
             taskbar: default_center(),
             clock: default_right(),
+            sys_popup: default_right(),
             tray: default_right(),
         }
     }
@@ -577,6 +580,7 @@ tray = "right"
         assert_eq!(migrated.schema_version, CURRENT_LAYOUT_SCHEMA_VERSION);
         assert_eq!(migrated.panel.launcher, "right");
         assert_eq!(migrated.panel.clock, "left");
+        assert_eq!(migrated.panel.sys_popup, "right");
     }
 
     #[test]
@@ -591,6 +595,7 @@ tray = "right"
                 launcher: "right".to_string(),
                 taskbar: "left".to_string(),
                 clock: "center".to_string(),
+                sys_popup: "left".to_string(),
                 tray: "right".to_string(),
             },
             launcher: LauncherLayout {
@@ -616,6 +621,7 @@ tray = "right"
         assert_eq!(loaded.panel.launcher, "right");
         assert_eq!(loaded.panel.taskbar, "left");
         assert_eq!(loaded.panel.clock, "center");
+        assert_eq!(loaded.panel.sys_popup, "left");
         assert_eq!(loaded.launcher.favorites_side, "left");
         assert_eq!(loaded.launcher.settings_side, "right");
     }

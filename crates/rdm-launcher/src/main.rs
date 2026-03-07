@@ -26,6 +26,27 @@ impl DisplayMode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum LauncherUiMode {
+    WinXpClassic,
+    Win11Grid,
+    Spotlight,
+    WhiskerPlus,
+    Retro98,
+}
+
+impl LauncherUiMode {
+    fn from_str(s: &str) -> Self {
+        match s {
+            "win11_grid" => Self::Win11Grid,
+            "spotlight" => Self::Spotlight,
+            "whisker_plus" => Self::WhiskerPlus,
+            "retro_98" => Self::Retro98,
+            _ => Self::WinXpClassic,
+        }
+    }
+}
+
 // ─── Main ────────────────────────────────────────────────────────
 
 fn main() {
@@ -45,6 +66,7 @@ fn main() {
 
 fn build_launcher(app: &Application, config: &RdmConfig) {
     let mode = DisplayMode::from_str(&config.panel.taskbar_mode);
+    let ui_mode = LauncherUiMode::from_str(&config.launcher.ui_mode);
     let launcher_pos = config.menu.launcher_position.clone();
     let layout = rdm_common::theme::load_active_theme_layout();
     let is_full = launcher_pos == "full";
@@ -111,7 +133,7 @@ fn build_launcher(app: &Application, config: &RdmConfig) {
     });
 
     // Build content
-    let content = build_menu_content(app, &config, mode, is_full, &layout);
+    let content = build_menu_content(app, &config, mode, is_full, &layout, ui_mode);
     window.set_child(Some(&content));
 
     load_css();
@@ -141,6 +163,29 @@ fn build_color_cache(entries: &[AppEntry], mode: DisplayMode) -> ColorCache {
 // ─── Menu content ─────────────────────────────────────────────────
 
 fn build_menu_content(
+    app: &Application,
+    config: &Rc<RefCell<RdmConfig>>,
+    mode: DisplayMode,
+    is_full: bool,
+    layout: &rdm_common::theme::ThemeLayout,
+    ui_mode: LauncherUiMode,
+) -> gtk4::Box {
+    match ui_mode {
+        LauncherUiMode::Win11Grid => build_menu_content_win11(app, config, mode, is_full, layout),
+        LauncherUiMode::Spotlight => {
+            build_menu_content_spotlight(app, config, mode, is_full, layout)
+        }
+        LauncherUiMode::WhiskerPlus => {
+            build_menu_content_whisker(app, config, mode, is_full, layout)
+        }
+        LauncherUiMode::Retro98 => build_menu_content_retro98(app, config, mode, is_full, layout),
+        LauncherUiMode::WinXpClassic => {
+            build_menu_content_classic(app, config, mode, is_full, layout)
+        }
+    }
+}
+
+fn build_menu_content_classic(
     app: &Application,
     config: &Rc<RefCell<RdmConfig>>,
     mode: DisplayMode,
@@ -429,6 +474,811 @@ fn build_menu_content(
     search_entry.grab_focus();
 
     root
+}
+
+fn build_menu_content_win11(
+    app: &Application,
+    _config: &Rc<RefCell<RdmConfig>>,
+    mode: DisplayMode,
+    _is_full: bool,
+    layout: &rdm_common::theme::ThemeLayout,
+) -> gtk4::Box {
+    let root = gtk4::Box::new(Orientation::Vertical, 0);
+    root.add_css_class("menu-root");
+
+    let top_bar = gtk4::Box::new(Orientation::Horizontal, 6);
+    top_bar.set_margin_top(12);
+    top_bar.set_margin_bottom(8);
+    top_bar.set_margin_start(12);
+    top_bar.set_margin_end(12);
+
+    let settings_btn = gtk4::Button::new();
+    settings_btn.set_icon_name("preferences-system-symbolic");
+    settings_btn.set_tooltip_text(Some("RDM Settings"));
+    settings_btn.add_css_class("menu-settings-btn");
+    settings_btn.set_valign(gtk4::Align::Center);
+    settings_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("rdm-settings").spawn();
+    });
+
+    let search_entry = gtk4::Entry::new();
+    search_entry.set_placeholder_text(Some("Search all applications..."));
+    search_entry.add_css_class("menu-search");
+    search_entry.set_hexpand(true);
+    if layout.launcher.settings_side == "right" {
+        top_bar.append(&search_entry);
+        top_bar.append(&settings_btn);
+    } else {
+        top_bar.append(&settings_btn);
+        top_bar.append(&search_entry);
+    }
+    root.append(&top_bar);
+
+    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let color_cache = build_color_cache(&entries, mode);
+
+    let grid_scroll = ScrolledWindow::new();
+    grid_scroll.set_vexpand(true);
+    grid_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    grid_scroll.set_margin_top(4);
+    grid_scroll.set_margin_bottom(8);
+    grid_scroll.set_margin_start(12);
+    grid_scroll.set_margin_end(12);
+
+    let grid_flow = gtk4::FlowBox::new();
+    grid_flow.set_selection_mode(gtk4::SelectionMode::None);
+    grid_flow.set_max_children_per_line(7);
+    grid_flow.set_min_children_per_line(4);
+    grid_flow.set_row_spacing(10);
+    grid_flow.set_column_spacing(10);
+    grid_flow.set_homogeneous(true);
+    grid_flow.add_css_class("menu-favorites");
+    populate_app_grid(&grid_flow, &entries, mode, app, &color_cache);
+    grid_scroll.set_child(Some(&grid_flow));
+    root.append(&grid_scroll);
+
+    let hint = Label::new(Some("Preset: Windows 11 Grid (all apps, no categories)"));
+    hint.add_css_class("menu-hint");
+    hint.set_halign(gtk4::Align::Start);
+    hint.set_margin_start(12);
+    hint.set_margin_end(12);
+    hint.set_margin_bottom(10);
+    root.append(&hint);
+
+    let entries_for_search = entries.clone();
+    let grid_for_search = grid_flow.clone();
+    let app_for_search = app.clone();
+    let cache_for_search = color_cache.clone();
+    search_entry.connect_changed(move |entry| {
+        let query = entry.text().to_string().to_lowercase();
+        if query.is_empty() {
+            populate_app_grid(
+                &grid_for_search,
+                &entries_for_search,
+                mode,
+                &app_for_search,
+                &cache_for_search,
+            );
+            return;
+        }
+        let filtered: Vec<AppEntry> = entries_for_search
+            .iter()
+            .filter(|e| {
+                e.name.to_lowercase().contains(&query)
+                    || e.comment
+                        .as_ref()
+                        .map(|c| c.to_lowercase().contains(&query))
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        populate_app_grid(
+            &grid_for_search,
+            &Rc::new(filtered),
+            mode,
+            &app_for_search,
+            &cache_for_search,
+        );
+    });
+
+    search_entry.grab_focus();
+    root
+}
+
+fn build_menu_content_spotlight(
+    app: &Application,
+    _config: &Rc<RefCell<RdmConfig>>,
+    mode: DisplayMode,
+    _is_full: bool,
+    _layout: &rdm_common::theme::ThemeLayout,
+) -> gtk4::Box {
+    let root = gtk4::Box::new(Orientation::Vertical, 0);
+    root.add_css_class("menu-root");
+    root.set_margin_top(12);
+    root.set_margin_bottom(12);
+    root.set_margin_start(12);
+    root.set_margin_end(12);
+
+    let top_bar = gtk4::Box::new(Orientation::Horizontal, 6);
+
+    let search_entry = gtk4::Entry::new();
+    search_entry.set_placeholder_text(Some("Type to search apps..."));
+    search_entry.add_css_class("menu-search");
+    search_entry.set_hexpand(true);
+    top_bar.append(&search_entry);
+
+    let settings_btn = gtk4::Button::new();
+    settings_btn.set_icon_name("preferences-system-symbolic");
+    settings_btn.set_tooltip_text(Some("RDM Settings"));
+    settings_btn.add_css_class("menu-settings-btn");
+    settings_btn.set_valign(gtk4::Align::Center);
+    settings_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("rdm-settings").spawn();
+    });
+    top_bar.append(&settings_btn);
+    top_bar.set_margin_bottom(10);
+    root.append(&top_bar);
+
+    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let color_cache = build_color_cache(&entries, mode);
+    let results_state: Rc<RefCell<Vec<AppEntry>>> = Rc::new(RefCell::new(Vec::new()));
+
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    let list = gtk4::ListBox::new();
+    list.add_css_class("menu-apps");
+    list.set_selection_mode(gtk4::SelectionMode::Single);
+    scroll.set_child(Some(&list));
+    root.append(&scroll);
+
+    let app_for_row = app.clone();
+    let results_for_row = results_state.clone();
+    list.connect_row_activated(move |_, row| {
+        let idx = row.index();
+        if idx < 0 {
+            return;
+        }
+        if let Some(entry) = results_for_row.borrow().get(idx as usize) {
+            launch_app(&entry.exec);
+            app_for_row.quit();
+        }
+    });
+
+    populate_spotlight_results(
+        &list,
+        &entries,
+        "",
+        mode,
+        &results_state,
+        app,
+        &color_cache,
+    );
+
+    let list_for_search = list.clone();
+    let entries_for_search = entries.clone();
+    let results_for_search = results_state.clone();
+    let app_for_search = app.clone();
+    let cache_for_search = color_cache.clone();
+    search_entry.connect_changed(move |entry| {
+        let query = entry.text().to_string();
+        populate_spotlight_results(
+            &list_for_search,
+            &entries_for_search,
+            &query,
+            mode,
+            &results_for_search,
+            &app_for_search,
+            &cache_for_search,
+        );
+    });
+
+    let results_for_enter = results_state.clone();
+    let app_for_enter = app.clone();
+    search_entry.connect_activate(move |_| {
+        if let Some(entry) = results_for_enter.borrow().first() {
+            launch_app(&entry.exec);
+            app_for_enter.quit();
+        }
+    });
+
+    search_entry.grab_focus();
+    root
+}
+
+fn build_menu_content_whisker(
+    app: &Application,
+    config: &Rc<RefCell<RdmConfig>>,
+    mode: DisplayMode,
+    _is_full: bool,
+    _layout: &rdm_common::theme::ThemeLayout,
+) -> gtk4::Box {
+    let root = gtk4::Box::new(Orientation::Vertical, 0);
+    root.add_css_class("menu-root");
+
+    let top_bar = gtk4::Box::new(Orientation::Horizontal, 6);
+    top_bar.set_margin_top(12);
+    top_bar.set_margin_bottom(8);
+    top_bar.set_margin_start(12);
+    top_bar.set_margin_end(12);
+
+    let search_entry = gtk4::Entry::new();
+    search_entry.set_placeholder_text(Some("Search apps..."));
+    search_entry.add_css_class("menu-search");
+    search_entry.set_hexpand(true);
+    top_bar.append(&search_entry);
+
+    let settings_btn = gtk4::Button::new();
+    settings_btn.set_icon_name("preferences-system-symbolic");
+    settings_btn.set_tooltip_text(Some("RDM Settings"));
+    settings_btn.add_css_class("menu-settings-btn");
+    settings_btn.set_valign(gtk4::Align::Center);
+    settings_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("rdm-settings").spawn();
+    });
+    top_bar.append(&settings_btn);
+    root.append(&top_bar);
+
+    let split = gtk4::Box::new(Orientation::Horizontal, 0);
+    split.set_vexpand(true);
+
+    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let categorized = Rc::new(desktop_apps::categorize_entries(&entries));
+    let color_cache = build_color_cache(&entries, mode);
+
+    // Left: categories rail.
+    let cat_pane = gtk4::Box::new(Orientation::Vertical, 0);
+    cat_pane.set_width_request(220);
+    cat_pane.add_css_class("menu-left");
+
+    let cat_scroll = ScrolledWindow::new();
+    cat_scroll.set_vexpand(true);
+    cat_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    let cat_list = gtk4::ListBox::new();
+    cat_list.add_css_class("menu-categories");
+    cat_list.set_selection_mode(gtk4::SelectionMode::Single);
+    cat_list.append(&make_category_row("All", mode));
+    let mut category_names: Vec<String> = categorized.keys().cloned().collect();
+    category_names.sort();
+    for name in &category_names {
+        cat_list.append(&make_category_row(name, mode));
+    }
+    cat_scroll.set_child(Some(&cat_list));
+    cat_pane.append(&cat_scroll);
+
+    // Right: favorites strip + app list.
+    let right_pane = gtk4::Box::new(Orientation::Vertical, 8);
+    right_pane.set_hexpand(true);
+    right_pane.add_css_class("menu-right");
+    right_pane.set_margin_top(8);
+    right_pane.set_margin_start(10);
+    right_pane.set_margin_end(12);
+    right_pane.set_margin_bottom(8);
+
+    let fav_header = Label::new(Some("Favorites"));
+    fav_header.add_css_class("menu-fav-header");
+    fav_header.set_halign(gtk4::Align::Start);
+    right_pane.append(&fav_header);
+
+    let fav_scroll = ScrolledWindow::new();
+    fav_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Never);
+    fav_scroll.set_max_content_height(118);
+    let fav_flow_inner = gtk4::FlowBox::new();
+    fav_flow_inner.set_selection_mode(gtk4::SelectionMode::None);
+    fav_flow_inner.set_max_children_per_line(12);
+    fav_flow_inner.set_min_children_per_line(1);
+    fav_flow_inner.set_row_spacing(8);
+    fav_flow_inner.set_column_spacing(8);
+    fav_flow_inner.set_homogeneous(true);
+    fav_flow_inner.set_valign(gtk4::Align::Start);
+    fav_flow_inner.add_css_class("menu-favorites");
+    let fav_flow: Rc<gtk4::FlowBox> = Rc::new(fav_flow_inner);
+    populate_favorites(&fav_flow, &entries, config, mode, &color_cache);
+    fav_scroll.set_child(Some(fav_flow.as_ref()));
+    right_pane.append(&fav_scroll);
+
+    let sep = gtk4::Separator::new(Orientation::Horizontal);
+    right_pane.append(&sep);
+
+    let app_scroll = ScrolledWindow::new();
+    app_scroll.set_vexpand(true);
+    app_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    let app_list = gtk4::ListBox::new();
+    app_list.add_css_class("menu-apps");
+    app_scroll.set_child(Some(&app_list));
+    right_pane.append(&app_scroll);
+
+    populate_app_list(
+        app,
+        &app_list,
+        &entries,
+        mode,
+        config,
+        &fav_flow,
+        &color_cache,
+    );
+
+    split.append(&cat_pane);
+    split.append(&gtk4::Separator::new(Orientation::Vertical));
+    split.append(&right_pane);
+    root.append(&split);
+
+    let entries_for_cat = entries.clone();
+    let categorized_for_cat = categorized.clone();
+    let app_list_for_cat = app_list.clone();
+    let config_for_cat = config.clone();
+    let fav_flow_for_cat = fav_flow.clone();
+    let app_for_cat = app.clone();
+    let cache_for_cat = color_cache.clone();
+    cat_list.connect_row_selected(move |_, row| {
+        if let Some(row) = row {
+            let idx = row.index();
+            if idx == 0 {
+                populate_app_list(
+                    &app_for_cat,
+                    &app_list_for_cat,
+                    &entries_for_cat,
+                    mode,
+                    &config_for_cat,
+                    &fav_flow_for_cat,
+                    &cache_for_cat,
+                );
+            } else {
+                let cat_keys: Vec<String> = categorized_for_cat.keys().cloned().collect();
+                if let Some(cat_name) = cat_keys.get((idx - 1) as usize) {
+                    if let Some(cat_entries) = categorized_for_cat.get(cat_name) {
+                        populate_app_list(
+                            &app_for_cat,
+                            &app_list_for_cat,
+                            &Rc::new(cat_entries.clone()),
+                            mode,
+                            &config_for_cat,
+                            &fav_flow_for_cat,
+                            &cache_for_cat,
+                        );
+                    }
+                }
+            }
+        }
+    });
+    if let Some(first_row) = cat_list.row_at_index(0) {
+        cat_list.select_row(Some(&first_row));
+    }
+
+    let entries_for_search = entries.clone();
+    let app_list_for_search = app_list.clone();
+    let fav_flow_for_search = fav_flow.clone();
+    let config_for_search = config.clone();
+    let app_for_search = app.clone();
+    let cache_for_search = color_cache.clone();
+    search_entry.connect_changed(move |entry| {
+        let query = entry.text().to_string().to_lowercase();
+        if query.is_empty() {
+            populate_app_list(
+                &app_for_search,
+                &app_list_for_search,
+                &entries_for_search,
+                mode,
+                &config_for_search,
+                &fav_flow_for_search,
+                &cache_for_search,
+            );
+            populate_favorites(
+                &fav_flow_for_search,
+                &entries_for_search,
+                &config_for_search,
+                mode,
+                &cache_for_search,
+            );
+            return;
+        }
+        let filtered: Vec<AppEntry> = entries_for_search
+            .iter()
+            .filter(|e| {
+                e.name.to_lowercase().contains(&query)
+                    || e.comment
+                        .as_ref()
+                        .map(|c| c.to_lowercase().contains(&query))
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        let filtered_rc = Rc::new(filtered);
+        populate_app_list(
+            &app_for_search,
+            &app_list_for_search,
+            &filtered_rc,
+            mode,
+            &config_for_search,
+            &fav_flow_for_search,
+            &cache_for_search,
+        );
+
+        let fav_names: Vec<String> = config_for_search.borrow().menu.favorites.clone();
+        let fav_entries: Vec<AppEntry> = filtered_rc
+            .iter()
+            .filter(|e| fav_names.contains(&e.name))
+            .cloned()
+            .collect();
+        populate_favorites_from_entries(
+            &fav_flow_for_search,
+            &fav_entries,
+            &config_for_search,
+            mode,
+            &fav_flow_for_search,
+            &entries_for_search,
+            &cache_for_search,
+        );
+    });
+
+    search_entry.grab_focus();
+    root
+}
+
+fn build_menu_content_retro98(
+    app: &Application,
+    config: &Rc<RefCell<RdmConfig>>,
+    mode: DisplayMode,
+    _is_full: bool,
+    _layout: &rdm_common::theme::ThemeLayout,
+) -> gtk4::Box {
+    let root = gtk4::Box::new(Orientation::Vertical, 0);
+    root.add_css_class("menu-root");
+
+    let top_bar = gtk4::Box::new(Orientation::Horizontal, 4);
+    top_bar.set_margin_top(8);
+    top_bar.set_margin_bottom(6);
+    top_bar.set_margin_start(8);
+    top_bar.set_margin_end(8);
+
+    let settings_btn = gtk4::Button::new();
+    settings_btn.set_icon_name("preferences-system-symbolic");
+    settings_btn.set_tooltip_text(Some("RDM Settings"));
+    settings_btn.add_css_class("menu-settings-btn");
+    settings_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("rdm-settings").spawn();
+    });
+    top_bar.append(&settings_btn);
+
+    let search_entry = gtk4::Entry::new();
+    search_entry.set_placeholder_text(Some("Find program..."));
+    search_entry.add_css_class("menu-search");
+    search_entry.set_hexpand(true);
+    top_bar.append(&search_entry);
+    root.append(&top_bar);
+
+    let split = gtk4::Box::new(Orientation::Horizontal, 0);
+    split.set_vexpand(true);
+
+    let entries = Rc::new(desktop_apps::load_desktop_entries());
+    let categorized = Rc::new(desktop_apps::categorize_entries(&entries));
+    let color_cache = build_color_cache(&entries, mode);
+
+    let cat_pane = gtk4::Box::new(Orientation::Vertical, 0);
+    cat_pane.set_width_request(200);
+    cat_pane.add_css_class("menu-left");
+    let cat_scroll = ScrolledWindow::new();
+    cat_scroll.set_vexpand(true);
+    cat_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    let cat_list = gtk4::ListBox::new();
+    cat_list.add_css_class("menu-categories");
+    cat_list.set_selection_mode(gtk4::SelectionMode::Single);
+    cat_list.append(&make_category_row("All", mode));
+    let mut category_names: Vec<String> = categorized.keys().cloned().collect();
+    category_names.sort();
+    for name in &category_names {
+        cat_list.append(&make_category_row(name, mode));
+    }
+    cat_scroll.set_child(Some(&cat_list));
+    cat_pane.append(&cat_scroll);
+
+    let app_pane = gtk4::Box::new(Orientation::Vertical, 0);
+    app_pane.set_hexpand(true);
+    app_pane.add_css_class("menu-right");
+    app_pane.set_margin_top(6);
+    app_pane.set_margin_start(8);
+    app_pane.set_margin_end(8);
+    app_pane.set_margin_bottom(8);
+
+    let app_scroll = ScrolledWindow::new();
+    app_scroll.set_vexpand(true);
+    app_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    let app_list = gtk4::ListBox::new();
+    app_list.add_css_class("menu-apps");
+    app_scroll.set_child(Some(&app_list));
+    app_pane.append(&app_scroll);
+
+    let hint = Label::new(Some("Preset: Retro 98 (category-first, compact list)"));
+    hint.add_css_class("menu-hint");
+    hint.set_halign(gtk4::Align::Start);
+    hint.set_margin_top(4);
+    app_pane.append(&hint);
+
+    split.append(&cat_pane);
+    split.append(&gtk4::Separator::new(Orientation::Vertical));
+    split.append(&app_pane);
+    root.append(&split);
+
+    let dummy_fav_flow = Rc::new(gtk4::FlowBox::new());
+    populate_app_list(
+        app,
+        &app_list,
+        &entries,
+        mode,
+        config,
+        &dummy_fav_flow,
+        &color_cache,
+    );
+
+    let entries_for_cat = entries.clone();
+    let categorized_for_cat = categorized.clone();
+    let app_list_for_cat = app_list.clone();
+    let config_for_cat = config.clone();
+    let app_for_cat = app.clone();
+    let cache_for_cat = color_cache.clone();
+    let dummy_for_cat = dummy_fav_flow.clone();
+    cat_list.connect_row_selected(move |_, row| {
+        if let Some(row) = row {
+            let idx = row.index();
+            if idx == 0 {
+                populate_app_list(
+                    &app_for_cat,
+                    &app_list_for_cat,
+                    &entries_for_cat,
+                    mode,
+                    &config_for_cat,
+                    &dummy_for_cat,
+                    &cache_for_cat,
+                );
+            } else {
+                let cat_keys: Vec<String> = categorized_for_cat.keys().cloned().collect();
+                if let Some(cat_name) = cat_keys.get((idx - 1) as usize) {
+                    if let Some(cat_entries) = categorized_for_cat.get(cat_name) {
+                        populate_app_list(
+                            &app_for_cat,
+                            &app_list_for_cat,
+                            &Rc::new(cat_entries.clone()),
+                            mode,
+                            &config_for_cat,
+                            &dummy_for_cat,
+                            &cache_for_cat,
+                        );
+                    }
+                }
+            }
+        }
+    });
+    if let Some(first_row) = cat_list.row_at_index(0) {
+        cat_list.select_row(Some(&first_row));
+    }
+
+    let entries_for_search = entries.clone();
+    let app_list_for_search = app_list.clone();
+    let config_for_search = config.clone();
+    let app_for_search = app.clone();
+    let cache_for_search = color_cache.clone();
+    let dummy_for_search = dummy_fav_flow.clone();
+    search_entry.connect_changed(move |entry| {
+        let query = entry.text().to_string().to_lowercase();
+        if query.is_empty() {
+            populate_app_list(
+                &app_for_search,
+                &app_list_for_search,
+                &entries_for_search,
+                mode,
+                &config_for_search,
+                &dummy_for_search,
+                &cache_for_search,
+            );
+            return;
+        }
+        let filtered: Vec<AppEntry> = entries_for_search
+            .iter()
+            .filter(|e| {
+                e.name.to_lowercase().contains(&query)
+                    || e.comment
+                        .as_ref()
+                        .map(|c| c.to_lowercase().contains(&query))
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        populate_app_list(
+            &app_for_search,
+            &app_list_for_search,
+            &Rc::new(filtered),
+            mode,
+            &config_for_search,
+            &dummy_for_search,
+            &cache_for_search,
+        );
+    });
+
+    search_entry.grab_focus();
+    root
+}
+
+fn populate_spotlight_results(
+    list: &gtk4::ListBox,
+    entries: &Rc<Vec<AppEntry>>,
+    query: &str,
+    mode: DisplayMode,
+    state: &Rc<RefCell<Vec<AppEntry>>>,
+    app: &Application,
+    cache: &ColorCache,
+) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    let q = query.trim().to_lowercase();
+    let mut filtered: Vec<AppEntry> = entries
+        .iter()
+        .filter(|e| {
+            if q.is_empty() {
+                return true;
+            }
+            e.name.to_lowercase().contains(&q)
+                || e.comment
+                    .as_ref()
+                    .map(|c| c.to_lowercase().contains(&q))
+                    .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+    filtered.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    filtered.truncate(12);
+    *state.borrow_mut() = filtered.clone();
+
+    for entry in &filtered {
+        let row = make_spotlight_row(entry, mode, app, cache);
+        list.append(&row);
+    }
+    if let Some(first) = list.row_at_index(0) {
+        list.select_row(Some(&first));
+    }
+}
+
+fn make_spotlight_row(
+    entry: &AppEntry,
+    mode: DisplayMode,
+    app: &Application,
+    cache: &ColorCache,
+) -> gtk4::ListBoxRow {
+    let row = gtk4::ListBoxRow::new();
+    let hbox = gtk4::Box::new(Orientation::Horizontal, 8);
+    hbox.set_margin_top(4);
+    hbox.set_margin_bottom(4);
+    hbox.set_margin_start(12);
+    hbox.set_margin_end(12);
+
+    match mode {
+        DisplayMode::Icons => {
+            if let Some(ref icon_name) = entry.icon {
+                let img = gtk4::Image::from_icon_name(icon_name);
+                img.set_pixel_size(22);
+                hbox.append(&img);
+            }
+        }
+        DisplayMode::Nerd => {
+            let glyph = app_nerd_glyph(entry);
+            let glyph_label = Label::new(Some(&glyph));
+            glyph_label.add_css_class("nerd-icon");
+            if let Some(ref icon_name) = entry.icon {
+                apply_icon_color(&glyph_label, icon_name, cache);
+            }
+            hbox.append(&glyph_label);
+        }
+        DisplayMode::Text => {}
+    }
+
+    let text_box = gtk4::Box::new(Orientation::Vertical, 2);
+    text_box.set_hexpand(true);
+    let name = Label::new(Some(&entry.name));
+    name.set_halign(gtk4::Align::Start);
+    name.add_css_class("menu-app-name");
+    text_box.append(&name);
+    if let Some(comment) = entry.comment.as_ref().filter(|c| !c.is_empty()) {
+        let sub = Label::new(Some(comment));
+        sub.set_halign(gtk4::Align::Start);
+        sub.add_css_class("menu-hint");
+        sub.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        text_box.append(&sub);
+    }
+    hbox.append(&text_box);
+
+    row.set_child(Some(&hbox));
+
+    let exec = entry.exec.clone();
+    let app_for_launch = app.clone();
+    let click = gtk4::GestureClick::new();
+    click.set_button(1);
+    click.connect_released(move |_, _, _, _| {
+        launch_app(&exec);
+        app_for_launch.quit();
+    });
+    row.add_controller(click);
+
+    row
+}
+
+fn populate_app_grid(
+    flow: &gtk4::FlowBox,
+    entries: &Rc<Vec<AppEntry>>,
+    mode: DisplayMode,
+    app: &Application,
+    cache: &ColorCache,
+) {
+    while let Some(child) = flow.first_child() {
+        flow.remove(&child);
+    }
+    for entry in entries.iter() {
+        let tile = make_grid_tile(entry, mode, app, cache);
+        flow.insert(&tile, -1);
+    }
+}
+
+fn make_grid_tile(
+    entry: &AppEntry,
+    mode: DisplayMode,
+    app: &Application,
+    cache: &ColorCache,
+) -> gtk4::FlowBoxChild {
+    let child = gtk4::FlowBoxChild::new();
+    child.add_css_class("menu-favorite");
+
+    let boxv = gtk4::Box::new(Orientation::Vertical, 6);
+    boxv.set_margin_top(8);
+    boxv.set_margin_bottom(8);
+    boxv.set_margin_start(8);
+    boxv.set_margin_end(8);
+    boxv.set_halign(gtk4::Align::Center);
+
+    match mode {
+        DisplayMode::Icons => {
+            if let Some(ref icon_name) = entry.icon {
+                let img = gtk4::Image::from_icon_name(icon_name);
+                img.set_pixel_size(32);
+                boxv.append(&img);
+            }
+        }
+        DisplayMode::Nerd => {
+            let glyph = app_nerd_glyph(entry);
+            let glyph_label = Label::new(Some(&glyph));
+            glyph_label.add_css_class("nerd-icon");
+            glyph_label.set_halign(gtk4::Align::Center);
+            if let Some(ref icon_name) = entry.icon {
+                apply_icon_color(&glyph_label, icon_name, cache);
+            }
+            boxv.append(&glyph_label);
+        }
+        DisplayMode::Text => {}
+    }
+
+    let name = Label::new(Some(&entry.name));
+    name.add_css_class("menu-fav-name");
+    name.set_halign(gtk4::Align::Center);
+    name.set_wrap(true);
+    name.set_max_width_chars(16);
+    name.set_justify(gtk4::Justification::Center);
+    if mode == DisplayMode::Text {
+        name.add_css_class("menu-fav-text-mode");
+    }
+    boxv.append(&name);
+
+    child.set_child(Some(&boxv));
+
+    let exec = entry.exec.clone();
+    let app_for_launch = app.clone();
+    let click = gtk4::GestureClick::new();
+    click.set_button(1);
+    click.connect_released(move |_, _, _, _| {
+        launch_app(&exec);
+        app_for_launch.quit();
+    });
+    child.add_controller(click);
+
+    child
 }
 
 // ─── Category rows ────────────────────────────────────────────────

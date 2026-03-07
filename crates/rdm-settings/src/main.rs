@@ -418,6 +418,38 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     lpos_row.append(&lpos_dropdown);
     page.append(&lpos_row);
 
+    // Launcher UI mode
+    let lmode_row = setting_row("Launcher UI");
+    let ui_modes = StringList::new(&[
+        "winxp_classic",
+        "win11_grid",
+        "spotlight",
+        "whisker_plus",
+        "retro_98",
+    ]);
+    let lmode_dropdown = DropDown::new(Some(ui_modes), gtk4::Expression::NONE);
+    let current_ui = &config.borrow().launcher.ui_mode;
+    lmode_dropdown.set_selected(match current_ui.as_str() {
+        "win11_grid" => 1,
+        "spotlight" => 2,
+        "whisker_plus" => 3,
+        "retro_98" => 4,
+        _ => 0,
+    });
+    let cfg = config.clone();
+    lmode_dropdown.connect_selected_notify(move |dd| {
+        let mode = match dd.selected() {
+            1 => "win11_grid",
+            2 => "spotlight",
+            3 => "whisker_plus",
+            4 => "retro_98",
+            _ => "winxp_classic",
+        };
+        cfg.borrow_mut().launcher.ui_mode = mode.to_string();
+    });
+    lmode_row.append(&lmode_dropdown);
+    page.append(&lmode_row);
+
     page
 }
 
@@ -673,6 +705,26 @@ fn build_theme_editor_page(
     panel_clock_row.append(&panel_clock_dd);
     page.append(&panel_clock_row);
 
+    let panel_sys_popup_row = setting_row("Panel: Sys Popup");
+    let panel_sys_popup_dd = DropDown::new(
+        Some(StringList::new(&["left", "center", "right"])),
+        gtk4::Expression::NONE,
+    );
+    panel_sys_popup_dd.set_selected(2);
+    {
+        let layout = theme_layout.clone();
+        panel_sys_popup_dd.connect_selected_notify(move |dd| {
+            let v = match dd.selected() {
+                1 => "center",
+                2 => "right",
+                _ => "left",
+            };
+            layout.borrow_mut().panel.sys_popup = v.to_string();
+        });
+    }
+    panel_sys_popup_row.append(&panel_sys_popup_dd);
+    page.append(&panel_sys_popup_row);
+
     let panel_tray_row = setting_row("Panel: Tray");
     let panel_tray_dd = DropDown::new(
         Some(StringList::new(&["left", "center", "right"])),
@@ -761,6 +813,7 @@ fn build_theme_editor_page(
     let panel_launcher_dd_for_load = panel_launcher_dd.clone();
     let panel_taskbar_dd_for_load = panel_taskbar_dd.clone();
     let panel_clock_dd_for_load = panel_clock_dd.clone();
+    let panel_sys_popup_dd_for_load = panel_sys_popup_dd.clone();
     let panel_tray_dd_for_load = panel_tray_dd.clone();
     let launcher_fav_dd_for_load = launcher_fav_dd.clone();
     let launcher_settings_dd_for_load = launcher_settings_dd.clone();
@@ -785,6 +838,11 @@ fn build_theme_editor_page(
             _ => 1,
         });
         panel_clock_dd_for_load.set_selected(match loaded_layout.panel.clock.as_str() {
+            "left" => 0,
+            "center" => 1,
+            _ => 2,
+        });
+        panel_sys_popup_dd_for_load.set_selected(match loaded_layout.panel.sys_popup.as_str() {
             "left" => 0,
             "center" => 1,
             _ => 2,

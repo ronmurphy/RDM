@@ -49,6 +49,8 @@ pub struct LauncherConfig {
     pub width: i32,
     #[serde(default = "default_launcher_height")]
     pub height: i32,
+    #[serde(default = "default_launcher_ui_mode")]
+    pub ui_mode: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -99,6 +101,9 @@ fn default_launcher_width() -> i32 {
 }
 fn default_launcher_height() -> i32 {
     400
+}
+fn default_launcher_ui_mode() -> String {
+    "winxp_classic".into()
 }
 fn default_snap_threshold() -> i32 {
     20
@@ -162,6 +167,7 @@ impl Default for LauncherConfig {
         Self {
             width: default_launcher_width(),
             height: default_launcher_height(),
+            ui_mode: default_launcher_ui_mode(),
         }
     }
 }

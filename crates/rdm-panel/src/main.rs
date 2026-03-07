@@ -284,7 +284,6 @@ fn build_panel_window(
     let tray = tray::setup_tray(app, mode);
     let tray_area = gtk4::Box::new(Orientation::Horizontal, 0);
     tray_area.add_css_class("tray-area");
-    tray_area.append(&task_popup_widget);
     tray_area.append(&sni_tray);
     tray_area.append(&tray);
 
@@ -316,6 +315,14 @@ fn build_panel_window(
     }
     append_panel_widget(
         &layout,
+        "sys_popup",
+        &task_popup_widget,
+        &left_zone,
+        &center_zone,
+        &right_zone,
+    );
+    append_panel_widget(
+        &layout,
         "tray",
         &tray_area,
         &left_zone,
@@ -341,6 +348,7 @@ fn append_panel_widget<W: IsA<gtk4::Widget>>(
         "launcher" => layout.panel.launcher.as_str(),
         "taskbar" => layout.panel.taskbar.as_str(),
         "clock" => layout.panel.clock.as_str(),
+        "sys_popup" => layout.panel.sys_popup.as_str(),
         "tray" => layout.panel.tray.as_str(),
         _ => "left",
     };
