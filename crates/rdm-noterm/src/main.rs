@@ -1,8 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea, DropDown,
-    Entry, Label, Orientation, Paned, Revealer, RevealerTransitionType, ScrolledWindow, StringList,
-    Switch, TextView,
+    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DropDown, Entry, Label,
+    Orientation, Paned, Picture, ScrolledWindow, StringList, Switch, TextView,
 };
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -83,10 +82,8 @@ struct UiState {
     breadcrumb_box: GtkBox,
     preview_label: Label,
     preview_text: TextView,
-    preview_image: DrawingArea,
-    preview_image_buf: Rc<RefCell<Option<gtk4::gdk_pixbuf::Pixbuf>>>,
+    preview_image: Picture,
     preview_stack: gtk4::Stack,
-    preview_revealer: Revealer,
     paned: Paned,
     open_system_btn: Button,
     selected_path: Option<PathBuf>,
@@ -203,51 +200,18 @@ fn build_ui(app: &Application) {
     preview_text_scroll.set_vexpand(true);
     preview_text_scroll.set_hexpand(true);
     preview_text_scroll.set_child(Some(&preview_text));
-    let preview_image = DrawingArea::new();
+    let preview_image = Picture::new();
     preview_image.set_hexpand(true);
     preview_image.set_vexpand(true);
     preview_image.set_halign(gtk4::Align::Fill);
     preview_image.set_valign(gtk4::Align::Fill);
-    let preview_image_buf: Rc<RefCell<Option<gtk4::gdk_pixbuf::Pixbuf>>> =
-        Rc::new(RefCell::new(None));
-    {
-        let buf_ref = preview_image_buf.clone();
-        preview_image.set_draw_func(move |_widget, cr, width, height| {
-            let binding = buf_ref.borrow();
-            let Some(pb) = binding.as_ref() else {
-                return;
-            };
-            let iw = pb.width() as f64;
-            let ih = pb.height() as f64;
-            if iw <= 0.0 || ih <= 0.0 || width <= 0 || height <= 0 {
-                return;
-            }
-            let scale = (width as f64 / iw).min(height as f64 / ih);
-            let draw_w = iw * scale;
-            let draw_h = ih * scale;
-            let x = (width as f64 - draw_w) * 0.5;
-            let y = (height as f64 - draw_h) * 0.5;
-            let _ = cr.save();
-            cr.translate(x, y);
-            cr.scale(scale, scale);
-            cr.set_source_pixbuf(pb, 0.0, 0.0);
-            let _ = cr.paint();
-            let _ = cr.restore();
-        });
-    }
+    preview_image.set_content_fit(gtk4::ContentFit::Contain);
     preview_stack.add_titled(&placeholder, Some("empty"), "Empty");
     preview_stack.add_titled(&preview_text_scroll, Some("text"), "Text");
     preview_stack.add_titled(&preview_image, Some("image"), "Image");
     preview_stack.set_visible_child_name("empty");
     preview_panel.append(&preview_stack);
-    let preview_revealer = Revealer::new();
-    preview_revealer.set_transition_type(RevealerTransitionType::SlideLeft);
-    preview_revealer.set_transition_duration(220);
-    preview_revealer.set_reveal_child(false);
-    preview_revealer.set_hexpand(true);
-    preview_revealer.set_vexpand(true);
-    preview_revealer.set_child(Some(&preview_panel));
-    paned.set_end_child(Some(&preview_revealer));
+    paned.set_end_child(Some(&preview_panel));
     paned.set_position(1040);
 
     let (places_box, place_buttons) = build_places_sidebar();
@@ -270,9 +234,7 @@ fn build_ui(app: &Application) {
         preview_label: preview_label.clone(),
         preview_text: preview_text.clone(),
         preview_image: preview_image.clone(),
-        preview_image_buf: preview_image_buf.clone(),
         preview_stack: preview_stack.clone(),
-        preview_revealer: preview_revealer.clone(),
         paned: paned.clone(),
         open_system_btn: open_system_btn.clone(),
         selected_path: None,
@@ -516,25 +478,38 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
             entry.path.display()
         )));
 
-        let state_click = state.clone();
-        let entry_click = entry.clone();
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |_, n_press, _, _| {
-            if entry_click.kind == EntryKind::Directory && n_press == 1 {
-                {
-                    let mut s = state_click.borrow_mut();
-                    s.cwd = entry_click.path.clone();
-                    s.cwd_label.set_text(&s.cwd.display().to_string());
+        // Primary single-click: navigate (dir) or preview (file).
+        // Uses connect_clicked — the standard Button signal — which fires
+        // reliably on every click, unlike GestureClick which can be denied
+        // by the Button's own internal gesture on subsequent presses.
+        {
+            let state_click = state.clone();
+            let entry_click = entry.clone();
+            tile_btn.connect_clicked(move |_| {
+                if entry_click.kind == EntryKind::Directory {
+                    {
+                        let mut s = state_click.borrow_mut();
+                        s.cwd = entry_click.path.clone();
+                        s.cwd_label.set_text(&s.cwd.display().to_string());
+                    }
+                    rebuild_breadcrumb(&state_click);
+                    refresh_ls_view(&state_click);
+                } else {
+                    update_preview(&state_click, &entry_click.path);
                 }
-                rebuild_breadcrumb(&state_click);
-                refresh_ls_view(&state_click);
-            } else if n_press == 1 {
-                update_preview(&state_click, &entry_click.path);
-            } else if n_press == 2 && !is_previewable(&entry_click.path) {
-                let _ = Command::new("xdg-open").arg(&entry_click.path).spawn();
-            }
-        });
-        tile_btn.add_controller(click);
+            });
+        }
+        // Double-click: open non-previewable files with the system handler.
+        if !is_previewable(&entry.path) {
+            let path_dbl = entry.path.clone();
+            let click = gtk4::GestureClick::new();
+            click.connect_pressed(move |_, n_press, _, _| {
+                if n_press == 2 {
+                    let _ = Command::new("xdg-open").arg(&path_dbl).spawn();
+                }
+            });
+            tile_btn.add_controller(click);
+        }
 
         flow.insert(&tile_btn, -1);
     }
@@ -982,7 +957,6 @@ fn save_mode(mode: RenderMode) {
 
 fn show_preview_panel(state: &Rc<RefCell<UiState>>) {
     let s = state.borrow();
-    s.preview_revealer.set_reveal_child(true);
     let width = s.paned.width();
     let usable = if width > 0 { width } else { 1100 };
     let start_width = ((usable as f64) * 0.25).round() as i32;
@@ -991,15 +965,14 @@ fn show_preview_panel(state: &Rc<RefCell<UiState>>) {
 
 fn hide_preview(state: &Rc<RefCell<UiState>>) {
     let mut s = state.borrow_mut();
-    s.preview_revealer.set_reveal_child(false);
     s.selected_path = None;
     s.preview_label.set_text("No selection");
     s.open_system_btn.set_sensitive(false);
-    *s.preview_image_buf.borrow_mut() = None;
+    s.preview_image.set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
     s.preview_stack.set_visible_child_name("empty");
     let width = s.paned.width();
     let usable = if width > 0 { width } else { 1100 };
-    s.paned.set_position(usable.saturating_sub(24));
+    s.paned.set_position(usable);
 }
 
 fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
@@ -1011,15 +984,14 @@ fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
     if is_image(path) {
         match gtk4::gdk_pixbuf::Pixbuf::from_file(path) {
             Ok(pb) => {
-                *s.preview_image_buf.borrow_mut() = Some(pb);
-                s.preview_image.queue_draw();
+                s.preview_image.set_pixbuf(Some(&pb));
                 s.preview_stack.set_visible_child_name("image");
                 drop(s);
                 show_preview_panel(state);
                 return;
             }
             Err(e) => {
-                *s.preview_image_buf.borrow_mut() = None;
+                s.preview_image.set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
                 s.preview_text
                     .buffer()
                     .set_text(&format!("Failed to decode image: {}", e));
@@ -1032,7 +1004,7 @@ fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
     }
 
     if is_text(path) {
-        *s.preview_image_buf.borrow_mut() = None;
+        s.preview_image.set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
         match std::fs::read_to_string(path) {
             Ok(content) => {
                 let preview = truncate_chars(&content, 30_000);
