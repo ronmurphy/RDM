@@ -107,7 +107,13 @@ pub fn setup_sni_tray() -> gtk4::Box {
 
     // Fallback path: discover SNI providers directly from the bus so icons can
     // still appear even when another broken watcher owns the bus name.
-    seed_items_from_bus_names(&conn, &tx);
+    // Run this deferred so panel startup isn't blocked by bus probing.
+    let conn_seed = conn.clone();
+    let tx_seed = tx.clone();
+    glib::idle_add_local_once(move || {
+        log::debug!("SNI: starting deferred bus-seed probe");
+        seed_items_from_bus_names(&conn_seed, &tx_seed);
+    });
 
     // Shared watcher state (needs Send+Sync for register_object closures).
     let registered_items: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -786,9 +792,22 @@ fn seed_items_from_bus_names(conn: &gio::DBusConnection, tx: &async_channel::Sen
         return;
     };
 
-    for name in names {
-        maybe_probe_service_for_sni(conn, &name, tx);
-    }
+    let names = Rc::new(names);
+    let idx = Rc::new(std::cell::Cell::new(0usize));
+    let names_c = names.clone();
+    let idx_c = idx.clone();
+    let conn_c = conn.clone();
+    let tx_c = tx.clone();
+    glib::timeout_add_local(Duration::from_millis(8), move || {
+        let i = idx_c.get();
+        if i >= names_c.len() {
+            log::debug!("SNI: deferred bus-seed probe complete ({} names)", names_c.len());
+            return glib::ControlFlow::Break;
+        }
+        idx_c.set(i + 1);
+        maybe_probe_service_for_sni(&conn_c, &names_c[i], &tx_c);
+        glib::ControlFlow::Continue
+    });
 }
 
 fn maybe_probe_service_for_sni(
@@ -821,7 +840,7 @@ fn maybe_probe_service_for_sni(
                 Some(&args),
                 None,
                 gio::DBusCallFlags::NONE,
-                300,
+                80,
                 gio::Cancellable::NONE,
             )
             .is_ok();
