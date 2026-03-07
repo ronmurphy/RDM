@@ -273,16 +273,23 @@ pub fn setup_tray(app: &gtk4::Application, mode: TaskbarMode) -> gtk4::MenuButto
         });
 
         let action_logout = gtk4::gio::SimpleAction::new("logout", None);
-        action_logout.connect_activate(|_, _| match Command::new("labwc").arg("--exit").status() {
-            Ok(status) if status.success() => {}
-            Ok(status) => {
-                let msg = format!("labwc --exit returned {}", status);
-                log::error!("{}", msg);
-                notify_error("Logout failed", &msg);
-            }
-            Err(e) => {
-                log::error!("Failed to logout: {}", e);
-                notify_error("Logout failed", &e.to_string());
+        action_logout.connect_activate(|_, _| {
+            // 1. Kill rdm-session first so no stale session survives logout
+            let _ = Command::new("pkill").args(["-SIGTERM", "rdm-session"]).status();
+            // 2. Brief pause to let rdm-session clean up
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            // 3. Now kill the compositor
+            match Command::new("pkill").args(["-SIGTERM", "labwc"]).status() {
+                Ok(status) if status.success() => {}
+                Ok(status) => {
+                    let msg = format!("pkill labwc returned {}", status);
+                    log::error!("{}", msg);
+                    notify_error("Logout failed", &msg);
+                }
+                Err(e) => {
+                    log::error!("Failed to logout: {}", e);
+                    notify_error("Logout failed", &e.to_string());
+                }
             }
         });
 

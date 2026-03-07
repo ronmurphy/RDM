@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static RELOAD_REQUESTED: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
 struct SessionConfig {
@@ -106,9 +107,32 @@ async fn main() {
     let config = load_session_config();
     let mut processes = start_all(&config);
 
+    // Track display apply timing for stabilization & crash detection
+    let session_start = std::time::Instant::now();
+    let mut last_display_apply = std::time::Instant::now();
+    let mut stabilization_applied = false;
+
     // Monitor loop
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Check for shutdown request (SIGTERM)
+        if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+            log::info!("SIGTERM received — shutting down session manager");
+            stop_all(&mut processes);
+            cleanup_pid_file();
+            break;
+        }
+
+        // Compositor health check: if labwc is no longer running, exit gracefully.
+        // This catches logout, compositor crashes, and any other scenario where
+        // the Wayland session is gone but rdm-session is still alive.
+        if !is_compositor_alive() {
+            log::info!("Compositor (labwc) is no longer running — cleaning up and exiting");
+            stop_all(&mut processes);
+            cleanup_pid_file();
+            break;
+        }
 
         // Check for hot reload request
         if RELOAD_REQUESTED.swap(false, Ordering::SeqCst) {
@@ -121,6 +145,8 @@ async fn main() {
 
             // Re-apply display config (may have changed via rdm-settings)
             apply_display_settings();
+            last_display_apply = std::time::Instant::now();
+            stabilization_applied = true; // no need for stabilization after hot reload
 
             // Small delay for display changes to settle before starting panel
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -133,8 +159,18 @@ async fn main() {
             continue;
         }
 
+        // Stabilization re-apply: ~20 seconds after startup, re-apply display config
+        // to catch labwc output resets that happen shortly after initialization
+        if !stabilization_applied && session_start.elapsed().as_secs() >= 20 {
+            stabilization_applied = true;
+            log::info!("Stabilization re-apply: re-applying display config 20s after startup");
+            apply_display_settings();
+            last_display_apply = std::time::Instant::now();
+        }
+
         // Normal monitoring — restart crashed processes (with backoff)
         let now = std::time::Instant::now();
+        let mut crashes_this_tick: u32 = 0;
         for proc in processes.iter_mut() {
             // If we're in a backoff hold, check whether we can restart yet.
             if proc.child.is_none() {
@@ -165,6 +201,7 @@ async fn main() {
                             uptime_secs
                         );
                         proc.child = None;
+                        crashes_this_tick += 1;
 
                         if !proc.entry.restart {
                             continue;
@@ -198,15 +235,27 @@ async fn main() {
                     Err(e) => {
                         log::error!("Error checking {}: {}", proc.entry.name, e);
                         proc.child = None;
+                        crashes_this_tick += 1;
                     }
                 }
             }
+        }
+
+        // Mass-crash detection: if multiple processes died at once, the compositor
+        // likely reset its outputs. Re-apply display config before restarts.
+        if crashes_this_tick >= 2 && last_display_apply.elapsed().as_secs() >= 10 {
+            log::info!(
+                "Detected {} simultaneous crashes — compositor likely reset outputs. Re-applying display config.",
+                crashes_this_tick
+            );
+            apply_display_settings();
+            last_display_apply = std::time::Instant::now();
         }
     }
 }
 
 fn install_signal_handler() {
-    // Use a simple signal-safe atomic flag
+    // Use simple signal-safe atomic flags
     unsafe {
         signal::sigaction(
             Signal::SIGUSR1,
@@ -217,12 +266,38 @@ fn install_signal_handler() {
             ),
         )
         .expect("Failed to install SIGUSR1 handler");
+
+        signal::sigaction(
+            Signal::SIGTERM,
+            &signal::SigAction::new(
+                signal::SigHandler::Handler(handle_sigterm),
+                signal::SaFlags::SA_RESTART,
+                signal::SigSet::empty(),
+            ),
+        )
+        .expect("Failed to install SIGTERM handler");
     }
-    log::info!("SIGUSR1 handler installed — send SIGUSR1 to reload shell components");
+    log::info!("Signal handlers installed (SIGUSR1=reload, SIGTERM=shutdown)");
 }
 
 extern "C" fn handle_sigusr1(_: libc::c_int) {
     RELOAD_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+extern "C" fn handle_sigterm(_: libc::c_int) {
+    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+/// Check if the compositor (labwc) is still running.
+/// If it's dead, there's no Wayland session to manage — rdm-session should exit.
+fn is_compositor_alive() -> bool {
+    Command::new("pgrep")
+        .args(["-x", "labwc"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn start_all(config: &SessionConfig) -> Vec<ManagedProcess> {
@@ -439,8 +514,29 @@ fn apply_display_settings() {
         log::info!("No display config in rdm.toml, using compositor defaults");
         return;
     }
-    match rdm_common::display::apply_display_config(&rdm_config.displays) {
-        Ok(()) => log::info!("Display configuration applied"),
-        Err(e) => log::error!("Failed to apply display config: {}", e),
+
+    // Retry loop — labwc may not have finished initializing outputs yet
+    let max_attempts = 10;
+    for attempt in 1..=max_attempts {
+        match rdm_common::display::apply_display_config(&rdm_config.displays) {
+            Ok(()) => {
+                log::info!("Display configuration applied (attempt {})", attempt);
+                return;
+            }
+            Err(e) => {
+                if attempt < max_attempts {
+                    log::warn!(
+                        "Display config attempt {}/{} failed: {} — retrying in 500ms",
+                        attempt, max_attempts, e
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                } else {
+                    log::error!(
+                        "Failed to apply display config after {} attempts: {}",
+                        max_attempts, e
+                    );
+                }
+            }
+        }
     }
 }

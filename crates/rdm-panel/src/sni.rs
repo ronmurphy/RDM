@@ -79,7 +79,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
     // For monitors added after the first: register the new box via the
     // existing channel so the async loop populates it with current items.
     if SNI_INITIALIZED.get() {
-        log::debug!("SNI: watcher already initialized, registering additional tray box");
+        // log::debug!("SNI: watcher already initialized, registering additional tray box");
         let weak = sni_box.downgrade();
         SNI_TX.with(|cell| {
             if let Some(tx) = cell.borrow().as_ref() {
@@ -91,7 +91,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
 
     let conn = match gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
         Ok(c) => {
-            log::debug!("SNI: connected to session D-Bus");
+            // log::debug!("SNI: connected to session D-Bus");
             c
         }
         Err(e) => {
@@ -111,7 +111,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
     let conn_seed = conn.clone();
     let tx_seed = tx.clone();
     glib::idle_add_local_once(move || {
-        log::debug!("SNI: starting deferred bus-seed probe");
+        // log::debug!("SNI: starting deferred bus-seed probe");
         seed_items_from_bus_names(&conn_seed, &tx_seed);
     });
 
@@ -154,16 +154,16 @@ pub fn setup_sni_tray() -> gtk4::Box {
                     "RegisterStatusNotifierItem" => {
                         let arg =
                             params.child_value(0).get::<String>().unwrap_or_default();
-                        log::debug!(
-                            "SNI: RegisterStatusNotifierItem sender={sender_str} arg={arg}"
-                        );
+                        // log::debug!(
+                        //     "SNI: RegisterStatusNotifierItem sender={sender_str} arg={arg}"
+                        // );
                         let (service, obj_path) =
                             normalize_sni_service(&arg, &sender_str);
                         let key = format!("{service}{obj_path}");
                         {
                             let mut items = items_m.lock().unwrap();
                             if items.contains(&key) {
-                                log::debug!("SNI: item already registered, skipping key={key}");
+                                // log::debug!("SNI: item already registered, skipping key={key}");
                                 invocation.return_value(None);
                                 return;
                             }
@@ -183,7 +183,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
                     }
                     "RegisterStatusNotifierHost" => {
                         *host_m.lock().unwrap() = true;
-                        log::debug!("SNI: RegisterStatusNotifierHost");
+                        // log::debug!("SNI: RegisterStatusNotifierHost");
                         let _ = conn_m.emit_signal(
                             None,
                             "/StatusNotifierWatcher",
@@ -283,7 +283,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
         "org.kde.StatusNotifierWatcher",
         gio::BusNameWatcherFlags::NONE,
         move |conn_inner, name, owner| {
-            log::debug!("SNI: watcher appeared name={name} owner={owner}");
+            // log::debug!("SNI: watcher appeared name={name} owner={owner}");
             schedule_host_registration(
                 conn_inner.clone(),
                 host_name_for_watch.clone(),
@@ -307,7 +307,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
         gio::DBusSignalFlags::NONE,
         move |_conn, _sender, _path, _iface, _signal, params| {
             if let Some(key) = params.child_value(0).get::<String>() {
-                log::debug!("SNI: observed StatusNotifierItemRegistered signal key={key}");
+                // log::debug!("SNI: observed StatusNotifierItemRegistered signal key={key}");
                 let (service, obj_path) = normalize_sni_service(&key, "");
                 let _ = tx_sig.send_blocking(SniEvent::ItemAdded { service, obj_path });
             }
@@ -360,14 +360,14 @@ pub fn setup_sni_tray() -> gtk4::Box {
     let tx_remove = tx.clone();
 
     glib::spawn_future_local(async move {
-        log::debug!("SNI: GTK event loop started");
+        // log::debug!("SNI: GTK event loop started");
         while let Ok(event) = rx.recv().await {
             match event {
                 SniEvent::ItemAdded { service, obj_path } => {
                     let key = format!("{service}{obj_path}");
-                    log::debug!("SNI: ItemAdded key={key}");
+                    // log::debug!("SNI: ItemAdded key={key}");
                     if items.borrow().contains_key(&key) {
-                        log::debug!("SNI: ItemAdded ignored, already present key={key}");
+                        // log::debug!("SNI: ItemAdded ignored, already present key={key}");
                         continue;
                     }
                     let Some((proxy, watch_id)) =
@@ -388,7 +388,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
                     items.borrow_mut().insert(key, SniItem { proxy, _watch_id: watch_id });
                 }
                 SniEvent::ItemRemoved { key } => {
-                    log::debug!("SNI: ItemRemoved key={key}");
+                    // log::debug!("SNI: ItemRemoved key={key}");
                     if items.borrow_mut().remove(&key).is_some() {
                         for sni_box in boxes.borrow_mut().iter_mut() {
                             if let Some(btn) = sni_box.buttons.remove(&key) {
@@ -401,7 +401,7 @@ pub fn setup_sni_tray() -> gtk4::Box {
                 }
                 SniEvent::BoxAdded { weak } => {
                     // A new monitor panel joined — populate it with existing items.
-                    log::debug!("SNI: BoxAdded event");
+                    // log::debug!("SNI: BoxAdded event");
                     let Some(b) = weak.upgrade() else { continue };
                     let mut buttons = HashMap::new();
                     for (key, item) in items.borrow().iter() {
@@ -443,7 +443,7 @@ async fn create_sni_proxy(
     tx_remove: &async_channel::Sender<SniEvent>,
     key: &str,
 ) -> Option<(gio::DBusProxy, Box<dyn std::any::Any>)> {
-    log::debug!("SNI: creating proxy service={service} path={obj_path}");
+    // log::debug!("SNI: creating proxy service={service} path={obj_path}");
     let proxy = gio::DBusProxy::new_future(
         conn,
         gio::DBusProxyFlags::NONE,
@@ -462,7 +462,7 @@ async fn create_sni_proxy(
         conn,
         service,
         gio::BusNameWatcherFlags::NONE,
-        |_, name, _| log::debug!("SNI: service appeared {name}"),
+        |_, name, _| { let _ = name; }, // log::debug!("SNI: service appeared {name}"),
         move |_, _| {
             log::info!("SNI: service vanished key={key_w}");
             let _ = tx_w.send_blocking(SniEvent::ItemRemoved { key: key_w.clone() });
@@ -475,11 +475,11 @@ async fn create_sni_proxy(
 /// Build a tray button wired up to an existing SNI proxy.
 /// Safe to call multiple times for the same proxy (one button per panel box).
 fn make_sni_button(proxy: &gio::DBusProxy, conn: &gio::DBusConnection) -> gtk4::Button {
-    log::debug!(
-        "SNI: make button service={:?} path={}",
-        proxy.name(),
-        proxy.object_path()
-    );
+    // log::debug!(
+    //     "SNI: make button service={:?} path={}",
+    //     proxy.name(),
+    //     proxy.object_path()
+    // );
     let btn = gtk4::Button::new();
     btn.set_has_frame(false);
     btn.set_size_request(18, 18);
@@ -499,7 +499,7 @@ fn make_sni_button(proxy: &gio::DBusProxy, conn: &gio::DBusConnection) -> gtk4::
         let alloc = b.allocation();
         let x = alloc.x() + alloc.width() / 2;
         let y = alloc.y() + alloc.height() / 2;
-        log::debug!("SNI: left-click activate x={x} y={y}");
+        // log::debug!("SNI: left-click activate x={x} y={y}");
         proxy_c.call(
             "Activate",
             Some(&(x, y).to_variant()),
@@ -529,7 +529,7 @@ fn make_sni_button(proxy: &gio::DBusProxy, conn: &gio::DBusConnection) -> gtk4::
             .unwrap_or_default();
 
         if let Some(path) = menu_path.filter(|_: &String| !service.is_empty()) {
-            log::debug!("SNI: right-click using DBusMenu service={service} path={path}");
+            // log::debug!("SNI: right-click using DBusMenu service={service} path={path}");
             dbusmenu::show(&conn_r, &service, &path, btn_ref);
         } else {
             // Fall back: let the app draw its own menu.
@@ -543,7 +543,7 @@ fn make_sni_button(proxy: &gio::DBusProxy, conn: &gio::DBusConnection) -> gtk4::
                 })
                 .unwrap_or((x as i32, y as i32));
             let proxy_fallback = proxy_r.clone();
-            log::debug!("SNI: right-click using ContextMenu fallback x={rx} y={ry}");
+            // log::debug!("SNI: right-click using ContextMenu fallback x={rx} y={ry}");
             proxy_r.call(
                 "ContextMenu",
                 Some(&(rx, ry).to_variant()),
@@ -554,7 +554,7 @@ fn make_sni_button(proxy: &gio::DBusProxy, conn: &gio::DBusConnection) -> gtk4::
                     // Some items don't implement ContextMenu and expect
                     // SecondaryActivate for right-click behavior.
                     if res.is_err() {
-                        log::debug!("SNI: ContextMenu failed, trying SecondaryActivate");
+                        // log::debug!("SNI: ContextMenu failed, trying SecondaryActivate");
                         proxy_fallback.call(
                             "SecondaryActivate",
                             Some(&(rx, ry).to_variant()),
@@ -588,7 +588,7 @@ fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
     // path before we try icon-name lookups.
     if let Some(icon_theme_path) = sni_string_property(proxy, "IconThemePath").filter(|s| !s.is_empty())
     {
-        log::debug!("SNI: applying IconThemePath={icon_theme_path}");
+        // log::debug!("SNI: applying IconThemePath={icon_theme_path}");
         if let Some(display) = gtk4::gdk::Display::default() {
             let theme = gtk4::IconTheme::for_display(&display);
             theme.add_search_path(&icon_theme_path);
@@ -598,10 +598,10 @@ fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
     // 1. Named icon from the icon theme.
     if let Some(name) = sni_string_property(proxy, "IconName").filter(|s| !s.is_empty())
     {
-        log::debug!("SNI: trying IconName={name}");
+        // log::debug!("SNI: trying IconName={name}");
         if let Some(img) = image_from_icon_name_or_path(&name) {
             btn.set_child(Some(&img));
-            log::debug!("SNI: icon resolved via IconName");
+            // log::debug!("SNI: icon resolved via IconName");
             return;
         }
     }
@@ -609,10 +609,10 @@ fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
     // 1b. Some items publish only AttentionIconName.
     if let Some(name) = sni_string_property(proxy, "AttentionIconName").filter(|s| !s.is_empty())
     {
-        log::debug!("SNI: trying AttentionIconName={name}");
+        // log::debug!("SNI: trying AttentionIconName={name}");
         if let Some(img) = image_from_icon_name_or_path(&name) {
             btn.set_child(Some(&img));
-            log::debug!("SNI: icon resolved via AttentionIconName");
+            // log::debug!("SNI: icon resolved via AttentionIconName");
             return;
         }
     }
@@ -621,7 +621,7 @@ fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
     if let Some(icon_pixmap) = sni_variant_property(proxy, "IconPixmap") {
         if let Some(img) = pixmap_to_image(&icon_pixmap) {
             btn.set_child(Some(&img));
-            log::debug!("SNI: icon resolved via IconPixmap");
+            // log::debug!("SNI: icon resolved via IconPixmap");
             return;
         }
     }
@@ -630,7 +630,7 @@ fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
     if let Some(attn_pixmap) = sni_variant_property(proxy, "AttentionIconPixmap") {
         if let Some(img) = pixmap_to_image(&attn_pixmap) {
             btn.set_child(Some(&img));
-            log::debug!("SNI: icon resolved via AttentionIconPixmap");
+            // log::debug!("SNI: icon resolved via AttentionIconPixmap");
             return;
         }
     }
@@ -640,12 +640,12 @@ fn refresh_sni_icon(btn: &gtk4::Button, proxy: &gio::DBusProxy) {
     img.set_pixel_size(16);
     if img.paintable().is_some() {
         btn.set_child(Some(&img));
-        log::debug!("SNI: icon fallback image-missing");
+        // log::debug!("SNI: icon fallback image-missing");
     } else {
         let lbl = gtk4::Label::new(Some("•"));
         lbl.set_width_chars(1);
         btn.set_child(Some(&lbl));
-        log::debug!("SNI: icon fallback bullet");
+        // log::debug!("SNI: icon fallback bullet");
     }
 }
 
@@ -661,10 +661,10 @@ fn sni_string_property(proxy: &gio::DBusProxy, prop: &str) -> Option<String> {
 
 fn sni_variant_property(proxy: &gio::DBusProxy, prop: &str) -> Option<glib::Variant> {
     if let Some(v) = proxy.cached_property(prop) {
-        log::debug!("SNI: property cache hit {prop}");
+        // log::debug!("SNI: property cache hit {prop}");
         return Some(v);
     }
-    log::debug!("SNI: property cache miss {prop}, using Properties.Get");
+    // log::debug!("SNI: property cache miss {prop}, using Properties.Get");
     let args = ("org.kde.StatusNotifierItem", prop).to_variant();
     let result = proxy
         .connection()
@@ -680,13 +680,13 @@ fn sni_variant_property(proxy: &gio::DBusProxy, prop: &str) -> Option<glib::Vari
             gio::Cancellable::NONE,
         )
         .map_err(|e| {
-            log::debug!("SNI: Properties.Get failed for {prop}: {e}");
+            // log::debug!("SNI: Properties.Get failed for {prop}: {e}");
             e
         })
         .ok()?;
     let out = result.child_value(0).get::<glib::Variant>();
     if out.is_none() {
-        log::debug!("SNI: Properties.Get returned empty variant for {prop}");
+        // log::debug!("SNI: Properties.Get returned empty variant for {prop}");
     }
     out
 }
@@ -739,7 +739,7 @@ fn register_status_notifier_host(conn: &gio::DBusConnection, host_name: &str) ->
         );
         match res {
             Ok(_) => return Some(path),
-            Err(e) => log::debug!("SNI: RegisterStatusNotifierHost failed at {path}: {e}"),
+            Err(e) => { let _ = e; }, // log::debug!("SNI: RegisterStatusNotifierHost failed at {path}: {e}"),
         }
     }
     None
@@ -783,12 +783,12 @@ fn seed_items_from_bus_names(conn: &gio::DBusConnection, tx: &async_channel::Sen
         200,
         gio::Cancellable::NONE,
     ) else {
-        log::debug!("SNI: ListNames failed, skipping bus-seed fallback");
+        // log::debug!("SNI: ListNames failed, skipping bus-seed fallback");
         return;
     };
 
     let Some(names) = result.child_value(0).get::<Vec<String>>() else {
-        log::debug!("SNI: ListNames result parse failed");
+        // log::debug!("SNI: ListNames result parse failed");
         return;
     };
 
@@ -801,7 +801,7 @@ fn seed_items_from_bus_names(conn: &gio::DBusConnection, tx: &async_channel::Sen
     glib::timeout_add_local(Duration::from_millis(8), move || {
         let i = idx_c.get();
         if i >= names_c.len() {
-            log::debug!("SNI: deferred bus-seed probe complete ({} names)", names_c.len());
+            // log::debug!("SNI: deferred bus-seed probe complete ({} names)", names_c.len());
             return glib::ControlFlow::Break;
         }
         idx_c.set(i + 1);
@@ -845,7 +845,7 @@ fn maybe_probe_service_for_sni(
             )
             .is_ok();
         if ok {
-            log::debug!("SNI: direct-probe found item service={service} path={path}");
+            // log::debug!("SNI: direct-probe found item service={service} path={path}");
             let _ = tx.send_blocking(SniEvent::ItemAdded {
                 service: service.to_string(),
                 obj_path: path.to_string(),
@@ -876,21 +876,21 @@ fn seed_registered_items(
         1000,
         gio::Cancellable::NONE,
     ) else {
-        log::debug!("SNI: could not read RegisteredStatusNotifierItems from {watcher_path}");
+        // log::debug!("SNI: could not read RegisteredStatusNotifierItems from {watcher_path}");
         return;
     };
 
     let Some(items_v) = result.child_value(0).get::<glib::Variant>() else {
-        log::debug!("SNI: watcher returned no RegisteredStatusNotifierItems variant");
+        // log::debug!("SNI: watcher returned no RegisteredStatusNotifierItems variant");
         return;
     };
     let Some(items) = items_v.get::<Vec<String>>() else {
-        log::debug!("SNI: watcher RegisteredStatusNotifierItems had unexpected type");
+        // log::debug!("SNI: watcher RegisteredStatusNotifierItems had unexpected type");
         return;
     };
 
     for key in items {
-        log::debug!("SNI: seeding existing item key={key}");
+        // log::debug!("SNI: seeding existing item key={key}");
         let (service, obj_path) = normalize_sni_service(&key, "");
         let _ = tx.send_blocking(SniEvent::ItemAdded { service, obj_path });
     }
