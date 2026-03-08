@@ -1,0 +1,29 @@
+[package]
+name = "rdm-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rdm-editor"
+path = "src/main.rs"
+
+[features]
+default = ["preview"]
+preview = ["dep:webkit6"]
+
+[dependencies]
+gtk4        = { workspace = true }
+log         = { workspace = true }
+env_logger  = { workspace = true }
+rdm-common  = { workspace = true }
+dirs        = { workspace = true }
+serde       = { workspace = true }
+toml        = { workspace = true }
+async-channel = { workspace = true }
+
+# GtkSourceView 5 — GTK 4 compatible, matches system library (gtksourceview-5)
+sourceview5 = "0.9"
+
+# WebKit preview — optional, requires webkitgtk-6.0 system library (GTK 4)
+webkit6 = { version = "0.4", optional = true }

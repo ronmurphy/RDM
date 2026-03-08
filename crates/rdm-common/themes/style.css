@@ -478,3 +478,110 @@ stacksidebar row:selected {
     font-size: 10px;
     color: @theme_muted;
 }
+
+/* ── Editor ────────────────────────────────────────────────────── */
+
+.editor-sidebar {
+    background-color: @theme_deep_bg;
+    border-right: 1px solid @theme_border;
+}
+
+.editor-sidebar treeview {
+    background-color: @theme_deep_bg;
+    color: @theme_fg;
+    font-size: 13px;
+}
+
+.editor-sidebar treeview:selected {
+    background-color: @theme_active;
+    color: @theme_contrast_fg;
+}
+
+.editor-tab-label {
+    font-size: 13px;
+    padding: 0 4px;
+}
+
+.editor-tab-modified {
+    color: @theme_yellow;
+}
+
+.editor-tab-close {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 0 2px;
+    min-height: 0;
+    min-width: 0;
+    font-size: 11px;
+    color: @theme_muted;
+}
+
+.editor-tab-close:hover {
+    background-color: @theme_surface;
+    color: @theme_fg;
+}
+
+.editor-output {
+    background-color: @theme_deep_bg;
+    color: @theme_fg;
+    font-family: "JetBrainsMono Nerd Font", "IosevkaTerm Nerd Font Mono", "MesloLGS Nerd Font Mono", monospace;
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.editor-statusbar {
+    background-color: @theme_surface;
+    border-top: 1px solid @theme_border;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+
+.editor-statusbar-item {
+    color: @theme_subtle;
+    padding: 0 8px;
+}
+
+.editor-statusbar-modified {
+    color: @theme_yellow;
+    font-weight: bold;
+}
+
+.editor-find-bar {
+    background-color: @theme_surface;
+    border-top: 1px solid @theme_border;
+    padding: 4px 8px;
+}
+
+.editor-run-btn {
+    background-color: @theme_green;
+    color: @theme_deep_bg;
+    border: none;
+    border-radius: 6px;
+    padding: 3px 14px;
+    font-weight: bold;
+    min-height: 0;
+}
+
+.editor-run-btn:hover {
+    opacity: 0.85;
+}
+
+.editor-stop-btn {
+    background-color: @theme_red;
+    color: @theme_deep_bg;
+    border: none;
+    border-radius: 6px;
+    padding: 3px 14px;
+    font-weight: bold;
+    min-height: 0;
+}
+
+.editor-stop-btn:hover {
+    opacity: 0.85;
+}
+
+.editor-preview-bar {
+    background-color: @theme_deep_bg;
+    border-left: 1px solid @theme_border;
+}

@@ -82,8 +82,9 @@ sudo install -Dm755 target/release/rdm-snap       "$PREFIX/bin/rdm-snap"
 sudo install -Dm755 target/release/rdm-watermark  "$PREFIX/bin/rdm-watermark"
 sudo install -Dm755 target/release/rdm-settings   "$PREFIX/bin/rdm-settings"
 sudo install -Dm755 target/release/rdm-notify    "$PREFIX/bin/rdm-notify"
+sudo install -Dm755 target/release/rdm-editor    "$PREFIX/bin/rdm-editor"
 
-ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify"
+ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-editor"
 
 # ─── Install scripts ───────────────────────────────────────────
 

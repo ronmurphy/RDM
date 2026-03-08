@@ -26,6 +26,8 @@ pub struct RdmConfig {
     pub displays: Vec<DisplayConfig>,
     #[serde(default)]
     pub idle: IdleConfig,
+    #[serde(default)]
+    pub editor: EditorConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -224,6 +226,77 @@ impl Default for AppearanceConfig {
     }
 }
 
+// ─── Editor ──────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct EditorConfig {
+    /// Editor font family and size (Pango format, e.g. "JetBrains Mono 13")
+    #[serde(default = "default_editor_font")]
+    pub font: String,
+    /// Number of spaces per tab stop
+    #[serde(default = "default_editor_tab_width")]
+    pub tab_width: u32,
+    /// Insert spaces instead of tab characters
+    #[serde(default = "default_true")]
+    pub insert_spaces: bool,
+    /// Show line numbers in the gutter
+    #[serde(default = "default_true")]
+    pub show_line_numbers: bool,
+    /// Highlight the line the cursor is on
+    #[serde(default = "default_true")]
+    pub highlight_current_line: bool,
+    /// Soft word wrap
+    #[serde(default)]
+    pub word_wrap: bool,
+    /// GtkSourceView color scheme ID (e.g. "rdm-theme", "classic", "oblivion")
+    #[serde(default = "default_editor_scheme")]
+    pub color_scheme: String,
+    /// Show the file-tree sidebar on startup
+    #[serde(default = "default_true")]
+    pub show_sidebar: bool,
+    /// Show the output panel on startup
+    #[serde(default)]
+    pub show_output: bool,
+    /// Directory to open on startup (empty = home dir)
+    #[serde(default)]
+    pub default_dir: String,
+    /// Auto-save file on focus loss
+    #[serde(default)]
+    pub autosave: bool,
+    /// Show the live preview pane for HTML/CSS/JS
+    #[serde(default = "default_true")]
+    pub show_preview: bool,
+}
+
+fn default_editor_font() -> String {
+    "JetBrains Mono 13".into()
+}
+fn default_editor_tab_width() -> u32 {
+    4
+}
+fn default_editor_scheme() -> String {
+    "classic".into()
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            font: default_editor_font(),
+            tab_width: default_editor_tab_width(),
+            insert_spaces: true,
+            show_line_numbers: true,
+            highlight_current_line: true,
+            word_wrap: false,
+            color_scheme: default_editor_scheme(),
+            show_sidebar: true,
+            show_output: false,
+            default_dir: String::new(),
+            autosave: false,
+            show_preview: true,
+        }
+    }
+}
+
 impl Default for RdmConfig {
     fn default() -> Self {
         Self {
@@ -236,6 +309,7 @@ impl Default for RdmConfig {
             appearance: AppearanceConfig::default(),
             displays: Vec::new(),
             idle: IdleConfig::default(),
+            editor: EditorConfig::default(),
         }
     }
 }

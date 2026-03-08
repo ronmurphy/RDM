@@ -51,6 +51,7 @@ CRATES=(
     rdm-snap
     rdm-watermark
     rdm-notify
+    rdm-editor
 )
 
 TOTAL=${#CRATES[@]}
