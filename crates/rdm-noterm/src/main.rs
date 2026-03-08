@@ -6,7 +6,7 @@ use gtk4::{
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -355,7 +355,7 @@ fn build_ui(app: &Application) {
         let state_open = state.clone();
         open_system_btn.connect_clicked(move |_| {
             if let Some(path) = state_open.borrow().selected_path.clone() {
-                let _ = Command::new("xdg-open").arg(path).spawn();
+                open_with_system(&state_open, &path);
             }
         });
     }
@@ -618,10 +618,11 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
         // Double-click: open non-previewable files with the system handler.
         if !is_previewable(&entry.path) {
             let path_dbl = entry.path.clone();
+            let state_dbl = state.clone();
             let click = gtk4::GestureClick::new();
             click.connect_pressed(move |_, n_press, _, _| {
                 if n_press == 2 {
-                    let _ = Command::new("xdg-open").arg(&path_dbl).spawn();
+                    open_with_system(&state_dbl, &path_dbl);
                 }
             });
             tile_btn.add_controller(click);
@@ -1099,12 +1100,19 @@ fn save_icon_size(size: u32) {
     let path = noterm_icon_size_path();
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            log::warn!("Failed to create config directory for NoTerm icon size: {}", e);
+            log::warn!(
+                "Failed to create config directory for NoTerm icon size: {}",
+                e
+            );
             return;
         }
     }
     if let Err(e) = std::fs::write(&path, format!("{}\n", size)) {
-        log::warn!("Failed to save NoTerm icon size to {}: {}", path.display(), e);
+        log::warn!(
+            "Failed to save NoTerm icon size to {}: {}",
+            path.display(),
+            e
+        );
     }
 }
 
@@ -1121,7 +1129,8 @@ fn hide_preview(state: &Rc<RefCell<UiState>>) {
     s.selected_path = None;
     s.preview_label.set_text("No selection");
     s.open_system_btn.set_sensitive(false);
-    s.preview_image.set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
+    s.preview_image
+        .set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
     s.preview_stack.set_visible_child_name("empty");
     let width = s.paned.width();
     let usable = if width > 0 { width } else { 1100 };
@@ -1144,7 +1153,8 @@ fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
                 return;
             }
             Err(e) => {
-                s.preview_image.set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
+                s.preview_image
+                    .set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
                 s.preview_text
                     .buffer()
                     .set_text(&format!("Failed to decode image: {}", e));
@@ -1157,7 +1167,8 @@ fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
     }
 
     if is_text(path) {
-        s.preview_image.set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
+        s.preview_image
+            .set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
         match std::fs::read_to_string(path) {
             Ok(content) => {
                 let preview = truncate_chars(&content, 30_000);
@@ -1262,7 +1273,8 @@ fn navigate_forward(state: &Rc<RefCell<UiState>>) {
         s.cwd = path;
         s.cwd_label.set_text(&s.cwd.display().to_string());
         s.back_btn.set_sensitive(true);
-        s.forward_btn.set_sensitive(s.nav_pos + 1 < s.nav_history.len());
+        s.forward_btn
+            .set_sensitive(s.nav_pos + 1 < s.nav_history.len());
     }
     rebuild_breadcrumb(state);
     refresh_ls_view(state);
@@ -1294,7 +1306,11 @@ fn update_status_bar(state: &Rc<RefCell<UiState>>) {
             }
         }
     }
-    let visible = if show_hidden { total } else { total.saturating_sub(hidden) };
+    let visible = if show_hidden {
+        total
+    } else {
+        total.saturating_sub(hidden)
+    };
     let hidden_note = if hidden > 0 && !show_hidden {
         format!("  •  {} hidden", hidden)
     } else {
@@ -1304,6 +1320,88 @@ fn update_status_bar(state: &Rc<RefCell<UiState>>) {
         "{} items  ({} dirs, {} files){}",
         visible, dirs, files, hidden_note
     ));
+}
+
+fn open_with_system(state: &Rc<RefCell<UiState>>, path: &Path) {
+    let path_buf = path.to_path_buf();
+    let path_label = path_buf.display().to_string();
+    let state_result = state.clone();
+
+    gtk4::glib::spawn_future_local(async move {
+        let (tx, rx) = async_channel::bounded::<Result<std::process::Output, String>>(1);
+        let thread_path = path_buf.clone();
+        std::thread::spawn(move || {
+            let result = Command::new("xdg-open")
+                .arg(&thread_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .output()
+                .map_err(|e| e.to_string());
+            let _ = tx.send_blocking(result);
+        });
+
+        let result = match rx.recv().await {
+            Ok(v) => v,
+            Err(_) => {
+                state_result
+                    .borrow()
+                    .status_label
+                    .set_text("Open failed: could not receive xdg-open result");
+                return;
+            }
+        };
+
+        match result {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let reason = if stderr.is_empty() {
+                    format!("xdg-open exited with status {}", out.status)
+                } else {
+                    stderr
+                };
+                state_result
+                    .borrow()
+                    .status_label
+                    .set_text(&format!("Open failed for {}: {}", path_label, reason));
+                log::warn!("xdg-open failed for {}: {}", path_label, reason);
+            }
+            Err(err) => {
+                state_result
+                    .borrow()
+                    .status_label
+                    .set_text(&format!("Open failed for {}: {}", path_label, err));
+                log::warn!("Failed to run xdg-open for {}: {}", path_label, err);
+            }
+        }
+    });
+}
+
+fn is_appimage(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("appimage"))
+        .unwrap_or(false)
+}
+
+fn run_appimage(state: &Rc<RefCell<UiState>>, path: &Path) {
+    match Command::new(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(_) => {}
+        Err(err) => {
+            state.borrow().status_label.set_text(&format!(
+                "Run failed for {}: {}",
+                path.display(),
+                err
+            ));
+            log::warn!("Failed to run AppImage {}: {}", path.display(), err);
+        }
+    }
 }
 
 fn show_context_menu(state: &Rc<RefCell<UiState>>, widget: &Button, entry: &LsEntry) {
@@ -1321,13 +1419,29 @@ fn show_context_menu(state: &Rc<RefCell<UiState>>, widget: &Button, entry: &LsEn
     open_btn.add_css_class("flat");
     {
         let path = entry.path.clone();
+        let state_open = state.clone();
         let pop = popover.clone();
         open_btn.connect_clicked(move |_| {
             pop.popdown();
-            let _ = Command::new("xdg-open").arg(&path).spawn();
+            open_with_system(&state_open, &path);
         });
     }
     vbox.append(&open_btn);
+
+    if is_appimage(&entry.path) {
+        let run_btn = Button::with_label("Run AppImage");
+        run_btn.add_css_class("flat");
+        {
+            let path = entry.path.clone();
+            let state_run = state.clone();
+            let pop = popover.clone();
+            run_btn.connect_clicked(move |_| {
+                pop.popdown();
+                run_appimage(&state_run, &path);
+            });
+        }
+        vbox.append(&run_btn);
+    }
 
     let copy_btn = Button::with_label("Copy Path");
     copy_btn.add_css_class("flat");
