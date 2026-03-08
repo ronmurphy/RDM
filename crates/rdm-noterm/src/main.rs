@@ -97,6 +97,8 @@ struct UiState {
     forward_btn: Button,
     status_label: Label,
     icon_size: u32,
+    places_box: GtkBox,
+    custom_places: Vec<PathBuf>,
 }
 
 fn main() {
@@ -246,7 +248,8 @@ fn build_ui(app: &Application) {
     paned.set_end_child(Some(&preview_panel));
     paned.set_position(1040);
 
-    let (places_box, place_buttons) = build_places_sidebar();
+    let places_box = GtkBox::new(Orientation::Vertical, 6);
+    places_box.set_width_request(140);
     let main_row = GtkBox::new(Orientation::Horizontal, 8);
     main_row.append(&places_box);
     main_row.append(&paned);
@@ -285,6 +288,8 @@ fn build_ui(app: &Application) {
         forward_btn: forward_btn.clone(),
         status_label: status_label.clone(),
         icon_size: initial_icon_size,
+        places_box: places_box.clone(),
+        custom_places: load_custom_places(),
     }));
 
     {
@@ -381,15 +386,7 @@ fn build_ui(app: &Application) {
         });
     }
 
-    for (btn, target) in place_buttons {
-        let state_btn = state.clone();
-        btn.connect_clicked(move |_| {
-            if target.is_dir() {
-                navigate_to(&state_btn, target.clone());
-            }
-        });
-    }
-
+    refresh_places_sidebar(&state);
     rebuild_breadcrumb(&state);
     refresh_ls_view(&state);
     update_status_bar(&state);
@@ -701,36 +698,210 @@ fn build_raw_ls_text(cwd: &Path, show_hidden: bool, query: &str) -> String {
     }
 }
 
-fn build_places_sidebar() -> (GtkBox, Vec<(Button, PathBuf)>) {
-    let box_widget = GtkBox::new(Orientation::Vertical, 6);
-    box_widget.set_width_request(140);
-    let title = Label::new(Some("Places"));
-    title.set_xalign(0.0);
-    box_widget.append(&title);
-
+fn default_places() -> Vec<(&'static str, PathBuf)> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     let docs = home.join("Documents");
     let dl = home.join("Downloads");
     let desk = home.join("Desktop");
-    let places = vec![
+    vec![
         ("Home", home.clone()),
         ("Desktop", desk),
         ("Documents", docs),
         ("Downloads", dl),
         ("Root", PathBuf::from("/")),
-    ];
+    ]
+}
 
-    let mut out = Vec::new();
-    for (name, path) in places {
-        if name == "Root" || path.exists() {
-            let btn = Button::with_label(name);
-            btn.set_halign(gtk4::Align::Fill);
-            box_widget.append(&btn);
-            out.push((btn, path));
+fn noterm_places_path() -> PathBuf {
+    rdm_common::config::config_dir().join("noterm-places")
+}
+
+fn load_custom_places() -> Vec<PathBuf> {
+    let path = noterm_places_path();
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+
+    let mut places = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let place = PathBuf::from(trimmed);
+        if place.is_dir() && !places.contains(&place) {
+            places.push(place);
         }
     }
+    places
+}
 
-    (box_widget, out)
+fn save_custom_places(places: &[PathBuf]) -> Result<(), String> {
+    let path = noterm_places_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = places
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, format!("{}\n", body)).map_err(|e| e.to_string())
+}
+
+fn refresh_places_sidebar(state: &Rc<RefCell<UiState>>) {
+    let (box_widget, custom_places) = {
+        let s = state.borrow();
+        (s.places_box.clone(), s.custom_places.clone())
+    };
+
+    while let Some(child) = box_widget.first_child() {
+        box_widget.remove(&child);
+    }
+
+    let title = Label::new(Some("Places"));
+    title.set_xalign(0.0);
+    box_widget.append(&title);
+
+    let mut built_in_paths = Vec::new();
+    for (name, path) in default_places() {
+        if name != "Root" && !path.exists() {
+            continue;
+        }
+        built_in_paths.push(path.clone());
+        let btn = Button::with_label(name);
+        btn.set_halign(gtk4::Align::Fill);
+        let state_btn = state.clone();
+        btn.connect_clicked(move |_| {
+            if path.is_dir() {
+                navigate_to(&state_btn, path.clone());
+            }
+        });
+        box_widget.append(&btn);
+    }
+
+    for path in custom_places {
+        if !path.is_dir() || built_in_paths.contains(&path) {
+            continue;
+        }
+        let label = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let btn = Button::with_label(&label);
+        btn.set_halign(gtk4::Align::Fill);
+        btn.set_tooltip_text(Some(&path.display().to_string()));
+        let state_btn = state.clone();
+        let path_click = path.clone();
+        btn.connect_clicked(move |_| {
+            if path_click.is_dir() {
+                navigate_to(&state_btn, path_click.clone());
+            }
+        });
+        {
+            let state_remove = state.clone();
+            let path_remove = path.clone();
+            let btn_ref = btn.clone();
+            let right_click = gtk4::GestureClick::new();
+            right_click.set_button(3);
+            right_click.connect_pressed(move |gesture, _, _, _| {
+                gesture.set_state(gtk4::EventSequenceState::Claimed);
+                show_place_context_menu(&state_remove, &btn_ref, &path_remove);
+            });
+            btn.add_controller(right_click);
+        }
+        box_widget.append(&btn);
+    }
+}
+
+fn add_to_places(state: &Rc<RefCell<UiState>>, path: &Path) {
+    if !path.is_dir() {
+        state
+            .borrow()
+            .status_label
+            .set_text("Add to Places only works for directories");
+        return;
+    }
+
+    let normalized = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let built_in_paths: Vec<PathBuf> = default_places().into_iter().map(|(_, p)| p).collect();
+
+    {
+        let mut s = state.borrow_mut();
+        if built_in_paths.contains(&normalized) || s.custom_places.contains(&normalized) {
+            s.status_label.set_text("Directory is already in Places");
+            return;
+        }
+        s.custom_places.push(normalized.clone());
+        s.custom_places
+            .sort_by_key(|p| p.to_string_lossy().to_string());
+        if let Err(err) = save_custom_places(&s.custom_places) {
+            s.status_label
+                .set_text(&format!("Failed to save Places: {}", err));
+            log::warn!("Failed to save custom places: {}", err);
+            return;
+        }
+        s.status_label
+            .set_text(&format!("Added to Places: {}", normalized.display()));
+    }
+
+    refresh_places_sidebar(state);
+}
+
+fn remove_from_places(state: &Rc<RefCell<UiState>>, path: &Path) {
+    let removed = {
+        let mut s = state.borrow_mut();
+        let before = s.custom_places.len();
+        s.custom_places.retain(|p| p != path);
+        let changed = s.custom_places.len() != before;
+        if !changed {
+            s.status_label.set_text("Directory is not in custom Places");
+            return;
+        }
+        if let Err(err) = save_custom_places(&s.custom_places) {
+            s.status_label
+                .set_text(&format!("Failed to save Places: {}", err));
+            log::warn!("Failed to save custom places: {}", err);
+            false
+        } else {
+            s.status_label
+                .set_text(&format!("Removed from Places: {}", path.display()));
+            true
+        }
+    };
+
+    if removed {
+        refresh_places_sidebar(state);
+    }
+}
+
+fn show_place_context_menu(state: &Rc<RefCell<UiState>>, widget: &Button, path: &Path) {
+    let popover = Popover::new();
+    popover.set_parent(widget);
+    popover.set_has_arrow(true);
+
+    let vbox = GtkBox::new(Orientation::Vertical, 2);
+    vbox.set_margin_top(4);
+    vbox.set_margin_bottom(4);
+    vbox.set_margin_start(4);
+    vbox.set_margin_end(4);
+
+    let remove_btn = Button::with_label("Remove from Places");
+    remove_btn.add_css_class("flat");
+    {
+        let state_remove = state.clone();
+        let path_remove = path.to_path_buf();
+        let pop = popover.clone();
+        remove_btn.connect_clicked(move |_| {
+            pop.popdown();
+            remove_from_places(&state_remove, &path_remove);
+        });
+    }
+    vbox.append(&remove_btn);
+
+    popover.set_child(Some(&vbox));
+    popover.popup();
 }
 
 fn rebuild_breadcrumb(state: &Rc<RefCell<UiState>>) {
@@ -1441,6 +1612,21 @@ fn show_context_menu(state: &Rc<RefCell<UiState>>, widget: &Button, entry: &LsEn
             });
         }
         vbox.append(&run_btn);
+    }
+
+    if entry.kind == EntryKind::Directory {
+        let add_place_btn = Button::with_label("Add to Places");
+        add_place_btn.add_css_class("flat");
+        {
+            let path = entry.path.clone();
+            let state_add = state.clone();
+            let pop = popover.clone();
+            add_place_btn.connect_clicked(move |_| {
+                pop.popdown();
+                add_to_places(&state_add, &path);
+            });
+        }
+        vbox.append(&add_place_btn);
     }
 
     let copy_btn = Button::with_label("Copy Path");
