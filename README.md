@@ -1,3 +1,5 @@
+![sprite-animation](https://github.com/user-attachments/assets/0c752074-4b2a-476a-a073-7b5c54ec3ffc)
+
 # RDM — Rust Desktop Manager
 
 A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, session management, and NoTerm (a beginner-friendly terminal/files view) — with **9 built-in color themes** and a visual theme editor for creating your own.
