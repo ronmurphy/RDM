@@ -125,7 +125,7 @@ sudo pacman -S labwc swaybg foot
 sudo pacman -S grim slurp wl-clipboard wireplumber playerctl
 
 # Build dependencies
-sudo pacman -S rust cargo gtk4 gtk4-layer-shell
+sudo pacman -S rust cargo gtk4 gtk4-layer-shell gtksourceview5 webkit2gtk-6.0
 
 # Runtime dependencies
 sudo pacman -S networkmanager

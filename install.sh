@@ -51,11 +51,23 @@ else
     missing+=("gtk4-layer-shell")
 fi
 
+if pkg-config --exists gtksourceview-5 2>/dev/null; then
+    ok "gtksourceview5"
+else
+    missing+=("gtksourceview5")
+fi
+
+if pkg-config --exists webkitgtk-6.0 2>/dev/null; then
+    ok "webkit2gtk-6.0"
+else
+    missing+=("webkit2gtk-6.0 (optional, for rdm-editor preview)")
+fi
+
 if [ ${#missing[@]} -gt 0 ]; then
     err "Missing dependencies: ${missing[*]}"
     echo ""
     echo "  Install on Arch Linux:"
-    echo "    sudo pacman -S labwc swaybg foot rust gtk4 gtk4-layer-shell grim slurp wl-clipboard wireplumber networkmanager"
+    echo "    sudo pacman -S labwc swaybg foot rust gtk4 gtk4-layer-shell gtksourceview5 webkit2gtk-6.0 grim slurp wl-clipboard wireplumber networkmanager"
     echo ""
     echo "  Then re-run this script."
     exit 1
