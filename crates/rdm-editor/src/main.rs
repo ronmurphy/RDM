@@ -3,18 +3,25 @@ use gtk4::Application;
 
 mod app;
 mod config;
+mod diff_tool;
 mod find;
+mod goto;
+mod help;
 mod menubar;
 mod notebook;
 mod output;
 mod runner;
 mod schemes;
+mod session;
 mod sidebar;
 mod statusbar;
 mod tab;
 
 #[cfg(feature = "preview")]
 mod preview;
+
+#[cfg(feature = "preview")]
+mod ai_panel;
 
 fn main() {
     env_logger::init();

@@ -26,7 +26,9 @@ pub fn build(app: &Application) -> gtk4::PopoverMenuBar {
     edit_menu.append(Some("Copy"),       Some("app.copy"));
     edit_menu.append(Some("Paste"),      Some("app.paste"));
     edit_menu.append(Some("Select All"), Some("app.select-all"));
-    edit_menu.append(Some("Find…"),      Some("app.find"));
+    edit_menu.append(Some("Find…"),          Some("app.find"));
+    edit_menu.append(Some("Find & Replace…"), Some("app.find-replace"));
+    edit_menu.append(Some("Go to Line…"),     Some("app.goto-line"));
 
     let edit_item = MenuItem::new(Some("Edit"), None);
     edit_item.set_submenu(Some(&edit_menu));
@@ -37,6 +39,7 @@ pub fn build(app: &Application) -> gtk4::PopoverMenuBar {
     view_menu.append(Some("Toggle Sidebar"),  Some("app.toggle-sidebar"));
     view_menu.append(Some("Toggle Output"),   Some("app.toggle-output"));
     view_menu.append(Some("Toggle Preview"),  Some("app.toggle-preview"));
+    view_menu.append(Some("Toggle Minimap"),  Some("app.toggle-minimap"));
 
     let view_item = MenuItem::new(Some("View"), None);
     view_item.set_submenu(Some(&view_menu));
@@ -53,9 +56,21 @@ pub fn build(app: &Application) -> gtk4::PopoverMenuBar {
     run_item.set_submenu(Some(&run_menu));
     menubar_model.append_item(&run_item);
 
+    // ── AI ────────────────────────────────────────────────────────
+    let ai_menu = Menu::new();
+    ai_menu.append(Some("Open AI Chat…"),        Some("app.ai-open"));
+    ai_menu.append(Some("Copy File for AI"),     Some("app.ai-copy-file"));
+    ai_menu.append(Some("Copy Selection for AI"), Some("app.ai-copy-selection"));
+    ai_menu.append(Some("Apply AI Diff…"),       Some("app.ai-apply-diff"));
+
+    let ai_item = MenuItem::new(Some("AI"), None);
+    ai_item.set_submenu(Some(&ai_menu));
+    menubar_model.append_item(&ai_item);
+
     // ── Help ─────────────────────────────────────────────────────
     let help_menu = Menu::new();
-    help_menu.append(Some("About rdm-editor"), Some("app.about"));
+    help_menu.append(Some("Help / Shortcuts"),  Some("app.help"));
+    help_menu.append(Some("About rdm-editor"),  Some("app.about"));
 
     let help_item = MenuItem::new(Some("Help"), None);
     help_item.set_submenu(Some(&help_menu));
@@ -64,10 +79,11 @@ pub fn build(app: &Application) -> gtk4::PopoverMenuBar {
     // Register stub actions (wired later by app.rs via add_action callbacks).
     for name in &[
         "new-tab", "open", "save", "save-as", "close-tab",
-        "cut", "copy", "paste", "select-all", "find",
-        "toggle-sidebar", "toggle-output", "toggle-preview",
+        "cut", "copy", "paste", "select-all", "find", "find-replace", "goto-line",
+        "toggle-sidebar", "toggle-output", "toggle-preview", "toggle-minimap",
         "run", "build", "stop", "open-browser",
-        "about",
+        "ai-open", "ai-copy-file", "ai-copy-selection", "ai-apply-diff",
+        "help", "about",
     ] {
         let action = SimpleAction::new(name, None);
         app.add_action(&action);

@@ -127,6 +127,11 @@ impl NotebookManager {
         self.tabs.borrow().len()
     }
 
+    /// Return a snapshot of all open tabs.
+    pub fn all_tabs(&self) -> Vec<EditorTab> {
+        self.tabs.borrow().clone()
+    }
+
     // ── Private helpers ──────────────────────────────────────────
 
     fn add_tab(&self, tab: EditorTab, cfg: &EditorConfig) {

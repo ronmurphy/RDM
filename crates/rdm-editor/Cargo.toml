@@ -19,6 +19,7 @@ env_logger  = { workspace = true }
 rdm-common  = { workspace = true }
 dirs        = { workspace = true }
 serde       = { workspace = true }
+serde_json  = { workspace = true }
 toml        = { workspace = true }
 async-channel = { workspace = true }
 

@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 /// A single open file tab.
 #[derive(Clone)]
 pub struct EditorTab {
-    pub view:     View,
-    pub scroll:   ScrolledWindow,
-    pub path:     std::rc::Rc<std::cell::RefCell<Option<PathBuf>>>,
-    pub modified: std::rc::Rc<std::cell::RefCell<bool>>,
+    pub view:       View,
+    pub scroll:     ScrolledWindow,
+    pub path:       std::rc::Rc<std::cell::RefCell<Option<PathBuf>>>,
+    pub modified:   std::rc::Rc<std::cell::RefCell<bool>>,
+    /// Last-seen modification time of the file on disk — used for external-change detection.
+    pub last_mtime: std::rc::Rc<std::cell::RefCell<Option<std::time::SystemTime>>>,
 }
 
 impl EditorTab {
@@ -27,15 +29,16 @@ impl EditorTab {
             .child(&view)
             .build();
 
-        let path = std::rc::Rc::new(std::cell::RefCell::new(None));
-        let modified = std::rc::Rc::new(std::cell::RefCell::new(false));
+        let path      = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let modified  = std::rc::Rc::new(std::cell::RefCell::new(false));
+        let last_mtime = std::rc::Rc::new(std::cell::RefCell::new(None::<std::time::SystemTime>));
 
         let modified_clone = modified.clone();
         buffer.connect_modified_changed(move |buf| {
             *modified_clone.borrow_mut() = buf.is_modified();
         });
 
-        Self { view, scroll, path, modified }
+        Self { view, scroll, path, modified, last_mtime }
     }
 
     pub fn load_file(&self, path: &Path) -> std::io::Result<()> {
@@ -46,6 +49,9 @@ impl EditorTab {
         buffer.set_modified(false);
         *self.modified.borrow_mut() = false;
         *self.path.borrow_mut() = Some(path.to_path_buf());
+        *self.last_mtime.borrow_mut() = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok());
         Ok(())
     }
 
@@ -64,6 +70,9 @@ impl EditorTab {
         buf.set_modified(false);
         *self.modified.borrow_mut() = false;
         *self.path.borrow_mut() = Some(path.to_path_buf());
+        *self.last_mtime.borrow_mut() = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok());
         Ok(())
     }
 
@@ -104,15 +113,17 @@ pub fn apply_config(view: &View, cfg: &EditorConfig) {
     view.set_show_line_numbers(cfg.show_line_numbers);
     view.set_highlight_current_line(cfg.highlight_current_line);
     view.set_tab_width(cfg.tab_width);
+    view.set_indent_width(-1); // follow tab_width
     view.set_insert_spaces_instead_of_tabs(cfg.insert_spaces);
     view.set_auto_indent(true);
     view.set_indent_on_tab(true);
     view.set_smart_home_end(sourceview5::SmartHomeEndType::Before);
+    view.set_show_right_margin(false);
     view.set_wrap_mode(if cfg.word_wrap { gtk4::WrapMode::Word } else { gtk4::WrapMode::None });
 
-    // Apply colour scheme to the buffer.
-    let buf = view.buffer().downcast::<Buffer>().ok();
-    if let Some(buf) = buf {
+    // Buffer-level settings.
+    if let Ok(buf) = view.buffer().downcast::<Buffer>() {
+        buf.set_highlight_matching_brackets(true);
         let mgr = StyleSchemeManager::default();
         if let Some(scheme) = mgr.scheme(&cfg.color_scheme) {
             buf.set_style_scheme(Some(&scheme));

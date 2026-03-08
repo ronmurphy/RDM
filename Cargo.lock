@@ -1144,6 +1144,7 @@ dependencies = [
  "log",
  "rdm-common",
  "serde",
+ "serde_json",
  "sourceview5",
  "toml 0.8.2",
  "webkit6",

@@ -1,4 +1,4 @@
-use sourceview5::prelude::*;
+use sourceview5::{prelude::*, Map};
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, FileDialog, Orientation, Paned,
 };
@@ -7,8 +7,14 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use crate::diff_tool;
 use crate::find::FindBar;
+use crate::goto;
+use crate::help;
 use crate::menubar;
+
+#[cfg(feature = "preview")]
+use crate::ai_panel;
 use crate::notebook::NotebookManager;
 use crate::output::OutputPanel;
 use crate::runner::RunManager;
@@ -39,6 +45,8 @@ struct AppState {
     /// The inner horizontal paned (editor | preview).
     #[cfg(feature = "preview")]
     editor_preview_paned: Paned,
+    /// Source minimap widget (right side of editor).
+    minimap: Map,
 }
 
 pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
@@ -66,11 +74,22 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
     // ── Menu bar ──────────────────────────────────────────────────
     let menubar_widget = menubar::build(app);
 
-    // ── Editor column (notebook + find bar) ───────────────────────
+    // ── Minimap (right of editor, hidden by default) ──────────────
+    let minimap = Map::new();
+    minimap.set_size_request(100, -1);
+    minimap.set_visible(false);
+
+    // ── Editor column (notebook + minimap | find bar) ─────────────
+    let editor_body = GtkBox::new(Orientation::Horizontal, 0);
+    editor_body.set_hexpand(true);
+    editor_body.set_vexpand(true);
+    editor_body.append(&notebook.widget);
+    editor_body.append(&minimap);
+
     let editor_col = GtkBox::new(Orientation::Vertical, 0);
     editor_col.set_hexpand(true);
     editor_col.set_vexpand(true);
-    editor_col.append(&notebook.widget);
+    editor_col.append(&editor_body);
     editor_col.append(&find_bar.widget);
 
     // ── Editor + optional Preview (horizontal paned) ──────────────
@@ -133,19 +152,21 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
         cfg:       cfg.clone(),
         main_paned: main_paned.clone(),
         vert_paned: vert_paned.clone(),
+        minimap:   minimap.clone(),
         #[cfg(feature = "preview")]
         preview:   preview.clone(),
         #[cfg(feature = "preview")]
         editor_preview_paned: editor_preview_paned.clone(),
     }));
 
-    // ── Connect notebook tab-switch → statusbar ───────────────────
+    // ── Connect notebook tab-switch → statusbar + minimap ─────────
     {
         let st = state.clone();
         notebook.on_switch(move |_, tab| {
             let s = st.borrow();
             s.statusbar.connect_tab(tab);
             s.find_bar.set_buffer(&tab.buffer());
+            s.minimap.set_view(&tab.view);
         });
     }
 
@@ -165,21 +186,28 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
         });
     }
 
-    // ── Open any files passed on command line ─────────────────────
+    // ── Open files (CLI args or session restore) ──────────────────
     {
         let s = state.borrow();
-        let startup_dir = if open_paths.is_empty() {
-            crate::config::startup_dir(&cfg)
+        let files_to_open = if open_paths.is_empty() {
+            crate::session::load()
         } else {
-            open_paths
-                .first()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                .unwrap_or_else(|| crate::config::startup_dir(&cfg))
+            open_paths.clone()
         };
+
+        let startup_dir = files_to_open
+            .first()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .unwrap_or_else(|| crate::config::startup_dir(&cfg));
         s.sidebar.set_root(&startup_dir);
 
-        for path in &open_paths {
+        for path in &files_to_open {
             s.notebook.open_file(path, &s.cfg);
+        }
+
+        // Wire minimap to the first opened tab.
+        if let Some(tab) = s.notebook.current_tab() {
+            s.minimap.set_view(&tab.view);
         }
 
         // If nothing opened, add a blank tab.
@@ -310,6 +338,26 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
         });
     }
 
+    // Edit → Find & Replace
+    {
+        let st = state.clone();
+        menubar::connect_action(app, "find-replace", move || {
+            st.borrow().find_bar.reveal_replace();
+        });
+    }
+
+    // Edit → Go to Line
+    {
+        let st = state.clone();
+        let win = window.clone();
+        menubar::connect_action(app, "goto-line", move || {
+            let s = st.borrow();
+            if let Some(tab) = s.notebook.current_tab() {
+                goto::show_goto_dialog(&win, &tab.buffer());
+            }
+        });
+    }
+
     // View → Toggle Sidebar
     {
         let st = state.clone();
@@ -339,6 +387,15 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
     #[cfg(not(feature = "preview"))]
     {
         menubar::connect_action(app, "toggle-preview", move || {});
+    }
+
+    // View → Toggle Minimap
+    {
+        let st = state.clone();
+        menubar::connect_action(app, "toggle-minimap", move || {
+            let s = st.borrow();
+            s.minimap.set_visible(!s.minimap.is_visible());
+        });
     }
 
     // Run → Run
@@ -444,6 +501,85 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
         });
     }
 
+    // AI → Open AI Chat
+    #[cfg(feature = "preview")]
+    {
+        let win = window.clone();
+        menubar::connect_action(app, "ai-open", move || {
+            ai_panel::show_ai_panel(&win);
+        });
+    }
+    #[cfg(not(feature = "preview"))]
+    menubar::connect_action(app, "ai-open", move || {});
+
+    // AI → Copy File for AI
+    {
+        let st = state.clone();
+        menubar::connect_action(app, "ai-copy-file", move || {
+            let s = st.borrow();
+            if let Some(tab) = s.notebook.current_tab() {
+                let buf = tab.buffer();
+                let (start, end) = buf.bounds();
+                let code = buf.text(&start, &end, false).to_string();
+                let filename = tab.title();
+                let lang = tab.language_name().to_lowercase();
+                let lang = map_lang_for_markdown(&lang);
+                #[cfg(feature = "preview")]
+                let formatted = ai_panel::format_for_ai(&filename, lang, &code, "");
+                #[cfg(not(feature = "preview"))]
+                let formatted = format_for_ai_simple(&filename, lang, &code);
+                copy_to_clipboard(&formatted);
+            }
+        });
+    }
+
+    // AI → Copy Selection for AI
+    {
+        let st = state.clone();
+        menubar::connect_action(app, "ai-copy-selection", move || {
+            let s = st.borrow();
+            if let Some(tab) = s.notebook.current_tab() {
+                let buf = tab.buffer();
+                let code = buf.selection_bounds()
+                    .map(|(a, b)| buf.text(&a, &b, false).to_string())
+                    .unwrap_or_else(|| {
+                        let (start, end) = buf.bounds();
+                        buf.text(&start, &end, false).to_string()
+                    });
+                let filename = tab.title();
+                let lang = tab.language_name().to_lowercase();
+                let lang = map_lang_for_markdown(&lang);
+                #[cfg(feature = "preview")]
+                let formatted = ai_panel::format_for_ai(&filename, lang, &code, "");
+                #[cfg(not(feature = "preview"))]
+                let formatted = format_for_ai_simple(&filename, lang, &code);
+                copy_to_clipboard(&formatted);
+            }
+        });
+    }
+
+    // AI → Apply AI Diff
+    {
+        let st = state.clone();
+        let win = window.clone();
+        menubar::connect_action(app, "ai-apply-diff", move || {
+            let working_dir = st.borrow()
+                .notebook
+                .current_tab()
+                .and_then(|t| t.path())
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            diff_tool::show_diff_dialog(&win, working_dir);
+        });
+    }
+
+    // Help → Help
+    {
+        let win = window.clone();
+        menubar::connect_action(app, "help", move || {
+            help::show_help(&win);
+        });
+    }
+
     // Help → About
     {
         let win = window.clone();
@@ -467,14 +603,146 @@ pub fn build_ui(app: &Application, open_paths: Vec<PathBuf>) {
     app.set_accels_for_action("app.save-as",       &["<Ctrl><Shift>S"]);
     app.set_accels_for_action("app.close-tab",     &["<Ctrl>W"]);
     app.set_accels_for_action("app.find",          &["<Ctrl>F"]);
+    app.set_accels_for_action("app.find-replace",  &["<Ctrl>H"]);
+    app.set_accels_for_action("app.goto-line",     &["<Ctrl>G"]);
     app.set_accels_for_action("app.toggle-sidebar", &["<Ctrl>B"]);
     app.set_accels_for_action("app.toggle-output", &["<Ctrl>J"]);
     app.set_accels_for_action("app.toggle-preview",&["<Ctrl><Shift>P"]);
+    app.set_accels_for_action("app.toggle-minimap",&["<Ctrl>M"]);
+    app.set_accels_for_action("app.ai-open",        &["<Ctrl><Alt>A"]);
+    app.set_accels_for_action("app.ai-copy-file",  &["<Ctrl><Alt>C"]);
+    app.set_accels_for_action("app.ai-apply-diff", &["<Ctrl><Alt>D"]);
+    app.set_accels_for_action("app.help",          &["F1"]);
     app.set_accels_for_action("app.run",           &["F5"]);
     app.set_accels_for_action("app.build",         &["<Ctrl><Shift>B"]);
     app.set_accels_for_action("app.stop",          &["<Shift>F5"]);
 
+    // ── Save session on close ─────────────────────────────────────
+    {
+        let st = state.clone();
+        window.connect_close_request(move |_| {
+            let s = st.borrow();
+            let paths: Vec<PathBuf> = s.notebook.all_tabs()
+                .iter()
+                .filter_map(|t| t.path())
+                .collect();
+            crate::session::save(&paths);
+            gtk4::glib::Propagation::Proceed
+        });
+    }
+
+    // ── Drag and drop — open dropped files ────────────────────────
+    {
+        let st = state.clone();
+        let drop = gtk4::DropTarget::new(
+            gtk4::gio::File::static_type(),
+            gtk4::gdk::DragAction::COPY,
+        );
+        drop.connect_drop(move |_, value, _, _| {
+            if let Ok(file) = value.get::<gtk4::gio::File>() {
+                if let Some(path) = file.path() {
+                    let s = st.borrow();
+                    s.notebook.open_file(&path, &s.cfg);
+                    return true;
+                }
+            }
+            false
+        });
+        window.add_controller(drop);
+    }
+
+    // ── File watcher — poll for external changes every 3 s ────────
+    {
+        let st = state.clone();
+        let win = window.clone();
+        gtk4::glib::timeout_add_seconds_local(3, move || {
+            let tabs = st.borrow().notebook.all_tabs();
+            for tab in tabs {
+                let path = match tab.path() {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let current_mtime = match std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                {
+                    Some(m) => m,
+                    None => continue,
+                };
+                let stored = tab.last_mtime.borrow().clone();
+                if let Some(stored_mtime) = stored {
+                    if current_mtime != stored_mtime {
+                        *tab.last_mtime.borrow_mut() = Some(current_mtime);
+                        let tab_c = tab.clone();
+                        let path_c = path.clone();
+                        let win_c = win.clone();
+                        gtk4::glib::idle_add_local_once(move || {
+                            let filename = path_c
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            let alert = gtk4::AlertDialog::builder()
+                                .message(format!("\"{}\" changed on disk.", filename))
+                                .detail("Reload the file from disk?")
+                                .buttons(["Reload", "Keep"])
+                                .cancel_button(1i32)
+                                .default_button(0i32)
+                                .build();
+                            alert.choose(
+                                Some(&win_c),
+                                gtk4::gio::Cancellable::NONE,
+                                move |result| {
+                                    if result == Ok(0) {
+                                        let _ = tab_c.load_file(&path_c);
+                                    }
+                                },
+                            );
+                        });
+                    }
+                }
+            }
+            gtk4::glib::ControlFlow::Continue
+        });
+    }
+
     window.present();
+}
+
+/// Map GtkSourceView language name to a markdown fence identifier.
+fn map_lang_for_markdown(lang: &str) -> &str {
+    match lang {
+        "python" | "python3"    => "python",
+        "rust"                  => "rust",
+        "javascript"            => "javascript",
+        "typescript"            => "typescript",
+        "html"                  => "html",
+        "css"                   => "css",
+        "toml"                  => "toml",
+        "json"                  => "json",
+        "sh" | "shell" | "bash" => "bash",
+        "markdown"              => "markdown",
+        "xml"                   => "xml",
+        "yaml"                  => "yaml",
+        "c"                     => "c",
+        "cpp" | "c++"           => "cpp",
+        _                       => "",
+    }
+}
+
+/// Copy text to the GTK clipboard.
+fn copy_to_clipboard(text: &str) {
+    if let Some(display) = gtk4::gdk::Display::default() {
+        display.clipboard().set_text(text);
+    }
+}
+
+/// Fallback format_for_ai used when the preview feature is disabled.
+#[cfg(not(feature = "preview"))]
+fn format_for_ai_simple(filename: &str, lang: &str, code: &str) -> String {
+    format!(
+        "File: `{filename}`\n\n```{lang}\n{code}\n```\n\n\
+         Please respond **only** with a unified git diff so I can apply it with `git apply`.",
+    )
 }
 
 /// Walk up from `path` to find the nearest Cargo.toml directory.

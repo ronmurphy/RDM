@@ -101,9 +101,11 @@ ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume"
 
 info "Registering RDM as a Wayland session..."
 
-sudo install -Dm644 config/rdm.desktop /usr/share/wayland-sessions/rdm.desktop
+sudo install -Dm644 config/rdm.desktop        /usr/share/wayland-sessions/rdm.desktop
+sudo install -Dm644 config/rdm-editor.desktop /usr/share/applications/rdm-editor.desktop
 
 ok "Session entry: /usr/share/wayland-sessions/rdm.desktop"
+ok "App entry:     /usr/share/applications/rdm-editor.desktop"
 
 # ─── Install D-Bus service for rdm-notify ──────────────────────
 

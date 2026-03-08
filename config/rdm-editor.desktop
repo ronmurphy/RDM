@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=RDM Editor
+GenericName=Text Editor
+Comment=RDM text editor with syntax highlighting and code runner
+Exec=rdm-editor %F
+Icon=text-editor
+Type=Application
+Categories=Development;TextEditor;Utility;
+Keywords=editor;text;code;programming;
+MimeType=text/plain;text/x-python;text/x-rust;text/javascript;text/typescript;text/html;text/css;text/x-toml;application/json;text/x-shellscript;text/x-makefile;text/markdown;text/xml;application/x-yaml;text/x-csrc;text/x-c++src;
+StartupNotify=true
+Terminal=false
