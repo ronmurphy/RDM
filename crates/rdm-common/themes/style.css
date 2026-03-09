@@ -494,6 +494,21 @@ window.rdm-dock {
     margin: 0 2px;
 }
 
+.dock-clock {
+    padding: 0 4px;
+}
+
+.dock-clock-time {
+    color: @theme_fg;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.dock-clock-date {
+    color: @theme_subtle;
+    font-size: 10px;
+}
+
 /* ── Watermark ─────────────────────────────────────────────────── */
 .watermark {
     color: @theme_subtle;

@@ -4,10 +4,18 @@ use gtk4::{
     Orientation, Paned, Picture, Popover, ScrolledWindow, StringList, Switch, TextView,
 };
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+const THUMB_QUEUE_CAPACITY: usize = 512;
+const THUMB_CACHE_MAX_ITEMS: usize = 256;
+const THUMB_CACHE_MAX_BYTES: usize = 192 * 1024 * 1024;
+const VIDEO_THUMB_DISK_CACHE_MAX_BYTES: u64 = 750 * 1024 * 1024;
+const VIDEO_THUMB_DISK_PRUNE_INTERVAL: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RenderMode {
@@ -70,7 +78,123 @@ struct LsEntry {
     kind: EntryKind,
     perms: String,
     size: String,
+    size_bytes: u64,
     modified: String,
+    modified_epoch: u64,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct ThumbCacheKey {
+    path: PathBuf,
+    size: u32,
+    file_size: u64,
+    modified_epoch: u64,
+}
+
+impl ThumbCacheKey {
+    fn from_entry(entry: &LsEntry, size: u32) -> Self {
+        Self {
+            path: entry.path.clone(),
+            size,
+            file_size: entry.size_bytes,
+            modified_epoch: entry.modified_epoch,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ThumbWidgetRefs {
+    picture: gtk4::glib::WeakRef<Picture>,
+    stack: gtk4::glib::WeakRef<gtk4::Stack>,
+}
+
+struct CachedThumb {
+    pixbuf: gtk4::gdk_pixbuf::Pixbuf,
+    bytes: usize,
+}
+
+#[derive(Clone)]
+struct ThumbJob {
+    key: ThumbCacheKey,
+    generation: u64,
+}
+
+#[derive(Clone)]
+struct ThumbResult {
+    key: ThumbCacheKey,
+    generation: u64,
+    thumb_path: PathBuf,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SortField {
+    Name,
+    Type,
+    Size,
+    Modified,
+}
+
+impl SortField {
+    fn from_selected(idx: u32) -> Self {
+        match idx {
+            1 => Self::Type,
+            2 => Self::Size,
+            3 => Self::Modified,
+            _ => Self::Name,
+        }
+    }
+
+    fn selected_index(self) -> u32 {
+        match self {
+            Self::Name => 0,
+            Self::Type => 1,
+            Self::Size => 2,
+            Self::Modified => 3,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Type => "type",
+            Self::Size => "size",
+            Self::Modified => "modified",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SortOrder {
+    Asc,
+    Desc,
+}
+
+impl SortOrder {
+    fn from_selected(idx: u32) -> Self {
+        if idx == 1 {
+            Self::Desc
+        } else {
+            Self::Asc
+        }
+    }
+
+    fn selected_index(self) -> u32 {
+        match self {
+            Self::Asc => 0,
+            Self::Desc => 1,
+        }
+    }
+
+    fn label(self, field: SortField) -> &'static str {
+        match (field, self) {
+            (SortField::Modified, SortOrder::Asc) => "oldest first",
+            (SortField::Modified, SortOrder::Desc) => "newest first",
+            (SortField::Size, SortOrder::Asc) => "smallest first",
+            (SortField::Size, SortOrder::Desc) => "largest first",
+            (_, SortOrder::Asc) => "ascending",
+            (_, SortOrder::Desc) => "descending",
+        }
+    }
 }
 
 struct UiState {
@@ -99,6 +223,22 @@ struct UiState {
     icon_size: u32,
     places_box: GtkBox,
     custom_places: Vec<PathBuf>,
+    cmd_history: Vec<String>,
+    history_pos: Option<usize>,
+    history_draft: String,
+    sort_field: SortField,
+    sort_order: SortOrder,
+    folders_first: bool,
+    batch_select_mode: bool,
+    selected_paths: HashSet<PathBuf>,
+    thumb_job_tx: async_channel::Sender<ThumbJob>,
+    thumb_generation: u64,
+    thumb_widgets: HashMap<ThumbCacheKey, Vec<ThumbWidgetRefs>>,
+    thumb_pending: HashSet<ThumbCacheKey>,
+    thumb_cache: HashMap<ThumbCacheKey, CachedThumb>,
+    thumb_lru: VecDeque<ThumbCacheKey>,
+    thumb_cache_bytes: usize,
+    last_thumb_disk_prune: Instant,
 }
 
 fn main() {
@@ -114,6 +254,14 @@ fn build_ui(app: &Application) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let initial_mode = load_saved_mode();
     let initial_icon_size = load_saved_icon_size();
+    let (thumb_result_tx, thumb_result_rx) = async_channel::unbounded::<ThumbResult>();
+    let (thumb_job_tx, thumb_job_rx) = async_channel::bounded::<ThumbJob>(THUMB_QUEUE_CAPACITY);
+    start_thumbnail_workers(
+        thumb_job_rx,
+        thumb_result_tx,
+        thumbnail_worker_count(),
+        VIDEO_THUMB_DISK_CACHE_MAX_BYTES,
+    );
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -171,14 +319,25 @@ fn build_ui(app: &Application) {
     let search_entry = Entry::new();
     search_entry.set_placeholder_text(Some("Search in enhanced ls"));
     search_entry.set_width_chars(24);
+    let folders_first_label = Label::new(Some("Folders First"));
+    let folders_first_switch = Switch::new();
+    folders_first_switch.set_active(true);
     let hidden_label = Label::new(Some("Hidden"));
     let hidden_switch = Switch::new();
+    let sort_btn = Button::with_label("Sort");
+    let batch_mode_btn = Button::with_label("Batch: Off");
+    let batch_actions_btn = Button::with_label("Selection");
     nav_row.append(&back_btn);
     nav_row.append(&forward_btn);
     nav_row.append(&breadcrumb_box);
     nav_row.append(&search_entry);
+    nav_row.append(&folders_first_label);
+    nav_row.append(&folders_first_switch);
     nav_row.append(&hidden_label);
     nav_row.append(&hidden_switch);
+    nav_row.append(&sort_btn);
+    nav_row.append(&batch_mode_btn);
+    nav_row.append(&batch_actions_btn);
     root.append(&nav_row);
 
     let cmd_row = GtkBox::new(Orientation::Horizontal, 8);
@@ -290,7 +449,32 @@ fn build_ui(app: &Application) {
         icon_size: initial_icon_size,
         places_box: places_box.clone(),
         custom_places: load_custom_places(),
+        cmd_history: Vec::new(),
+        history_pos: None,
+        history_draft: String::new(),
+        sort_field: SortField::Name,
+        sort_order: SortOrder::Asc,
+        folders_first: true,
+        batch_select_mode: false,
+        selected_paths: HashSet::new(),
+        thumb_job_tx: thumb_job_tx.clone(),
+        thumb_generation: 1,
+        thumb_widgets: HashMap::new(),
+        thumb_pending: HashSet::new(),
+        thumb_cache: HashMap::new(),
+        thumb_lru: VecDeque::new(),
+        thumb_cache_bytes: 0,
+        last_thumb_disk_prune: Instant::now(),
     }));
+
+    {
+        let state_thumb = state.clone();
+        gtk4::glib::spawn_future_local(async move {
+            while let Ok(result) = thumb_result_rx.recv().await {
+                handle_thumbnail_result(&state_thumb, result);
+            }
+        });
+    }
 
     {
         let state_mode = state.clone();
@@ -326,11 +510,240 @@ fn build_ui(app: &Application) {
     }
 
     {
+        let state_folders_first = state.clone();
+        folders_first_switch.connect_active_notify(move |sw| {
+            state_folders_first.borrow_mut().folders_first = sw.is_active();
+            refresh_ls_view(&state_folders_first);
+            update_status_bar(&state_folders_first);
+        });
+    }
+
+    {
         let state_hidden = state.clone();
         hidden_switch.connect_active_notify(move |sw| {
             state_hidden.borrow_mut().show_hidden = sw.is_active();
             refresh_ls_view(&state_hidden);
+            update_status_bar(&state_hidden);
         });
+    }
+
+    {
+        let sort_pop = Popover::new();
+        sort_pop.set_parent(&sort_btn);
+        sort_pop.set_has_arrow(true);
+
+        let vbox = GtkBox::new(Orientation::Vertical, 8);
+        vbox.set_margin_top(8);
+        vbox.set_margin_bottom(8);
+        vbox.set_margin_start(8);
+        vbox.set_margin_end(8);
+
+        let field_lbl = Label::new(Some("Sort by"));
+        field_lbl.set_xalign(0.0);
+        let field_dd = DropDown::new(
+            Some(StringList::new(&["Name", "Type", "Size", "Modified"])),
+            gtk4::Expression::NONE,
+        );
+        field_dd.set_selected(state.borrow().sort_field.selected_index());
+
+        let order_lbl = Label::new(Some("Order"));
+        order_lbl.set_xalign(0.0);
+        let order_dd = DropDown::new(
+            Some(StringList::new(&[
+                "Ascending (A-Z / oldest / smallest)",
+                "Descending (Z-A / newest / largest)",
+            ])),
+            gtk4::Expression::NONE,
+        );
+        order_dd.set_selected(state.borrow().sort_order.selected_index());
+
+        vbox.append(&field_lbl);
+        vbox.append(&field_dd);
+        vbox.append(&order_lbl);
+        vbox.append(&order_dd);
+        sort_pop.set_child(Some(&vbox));
+
+        {
+            let pop = sort_pop.clone();
+            sort_btn.connect_clicked(move |_| {
+                pop.popup();
+            });
+        }
+        {
+            let state_sort = state.clone();
+            field_dd.connect_selected_notify(move |dd| {
+                state_sort.borrow_mut().sort_field = SortField::from_selected(dd.selected());
+                refresh_ls_view(&state_sort);
+                update_status_bar(&state_sort);
+            });
+        }
+        {
+            let state_sort = state.clone();
+            order_dd.connect_selected_notify(move |dd| {
+                state_sort.borrow_mut().sort_order = SortOrder::from_selected(dd.selected());
+                refresh_ls_view(&state_sort);
+                update_status_bar(&state_sort);
+            });
+        }
+    }
+
+    {
+        let state_batch = state.clone();
+        let btn_ref = batch_mode_btn.clone();
+        batch_mode_btn.connect_clicked(move |_| {
+            let now_on = {
+                let mut s = state_batch.borrow_mut();
+                s.batch_select_mode = !s.batch_select_mode;
+                if !s.batch_select_mode {
+                    s.selected_paths.clear();
+                }
+                s.batch_select_mode
+            };
+            btn_ref.set_label(if now_on { "Batch: On" } else { "Batch: Off" });
+            refresh_ls_view(&state_batch);
+            update_status_bar(&state_batch);
+        });
+    }
+
+    {
+        let batch_pop = Popover::new();
+        batch_pop.set_parent(&batch_actions_btn);
+        batch_pop.set_has_arrow(true);
+
+        let vbox = GtkBox::new(Orientation::Vertical, 4);
+        vbox.set_margin_top(6);
+        vbox.set_margin_bottom(6);
+        vbox.set_margin_start(6);
+        vbox.set_margin_end(6);
+
+        let select_all_btn = Button::with_label("Select All Visible");
+        select_all_btn.add_css_class("flat");
+        let clear_btn = Button::with_label("Clear Selection");
+        clear_btn.add_css_class("flat");
+        let copy_btn = Button::with_label("Copy Selected Paths");
+        copy_btn.add_css_class("flat");
+        let open_btn = Button::with_label("Open Selected");
+        open_btn.add_css_class("flat");
+        let trash_btn = Button::with_label("Move Selected to Trash");
+        trash_btn.add_css_class("flat");
+
+        vbox.append(&select_all_btn);
+        vbox.append(&clear_btn);
+        vbox.append(&copy_btn);
+        vbox.append(&open_btn);
+        vbox.append(&trash_btn);
+        batch_pop.set_child(Some(&vbox));
+
+        {
+            let pop = batch_pop.clone();
+            batch_actions_btn.connect_clicked(move |_| {
+                pop.popup();
+            });
+        }
+        {
+            let state_sel = state.clone();
+            let pop = batch_pop.clone();
+            select_all_btn.connect_clicked(move |_| {
+                pop.popdown();
+                select_all_visible(&state_sel);
+            });
+        }
+        {
+            let state_sel = state.clone();
+            let pop = batch_pop.clone();
+            clear_btn.connect_clicked(move |_| {
+                pop.popdown();
+                state_sel.borrow_mut().selected_paths.clear();
+                refresh_ls_view(&state_sel);
+                update_status_bar(&state_sel);
+            });
+        }
+        {
+            let state_copy = state.clone();
+            let pop = batch_pop.clone();
+            copy_btn.connect_clicked(move |_| {
+                pop.popdown();
+                let selected = selected_paths_vec(&state_copy);
+                if selected.is_empty() {
+                    state_copy
+                        .borrow()
+                        .status_label
+                        .set_text("No selected items to copy");
+                    return;
+                }
+                let text = selected
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if let Some(display) = gtk4::gdk::Display::default() {
+                    display.clipboard().set_text(&text);
+                }
+                state_copy
+                    .borrow()
+                    .status_label
+                    .set_text(&format!("Copied {} path(s) to clipboard", selected.len()));
+            });
+        }
+        {
+            let state_open_sel = state.clone();
+            let pop = batch_pop.clone();
+            open_btn.connect_clicked(move |_| {
+                pop.popdown();
+                let selected = selected_paths_vec(&state_open_sel);
+                if selected.is_empty() {
+                    state_open_sel
+                        .borrow()
+                        .status_label
+                        .set_text("No selected items to open");
+                    return;
+                }
+                for p in &selected {
+                    open_with_system(&state_open_sel, p);
+                }
+                state_open_sel.borrow().status_label.set_text(&format!(
+                    "Opening {} selected item(s) with system handler",
+                    selected.len()
+                ));
+            });
+        }
+        {
+            let state_trash_sel = state.clone();
+            let pop = batch_pop.clone();
+            trash_btn.connect_clicked(move |_| {
+                pop.popdown();
+                let selected = selected_paths_vec(&state_trash_sel);
+                if selected.is_empty() {
+                    state_trash_sel
+                        .borrow()
+                        .status_label
+                        .set_text("No selected items to trash");
+                    return;
+                }
+                let mut moved = 0usize;
+                for p in &selected {
+                    let ok = Command::new("gio")
+                        .args(["trash", &p.display().to_string()])
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+                    if ok {
+                        moved += 1;
+                    }
+                }
+                {
+                    let mut s = state_trash_sel.borrow_mut();
+                    s.selected_paths.clear();
+                }
+                refresh_ls_view(&state_trash_sel);
+                update_status_bar(&state_trash_sel);
+                state_trash_sel.borrow().status_label.set_text(&format!(
+                    "Moved {} of {} selected item(s) to trash",
+                    moved,
+                    selected.len()
+                ));
+            });
+        }
     }
 
     {
@@ -354,6 +767,57 @@ fn build_ui(app: &Application) {
                 entry.set_text("");
             }
         });
+    }
+
+    {
+        let state_key = state.clone();
+        let cmd_entry_key = cmd_entry.clone();
+        let key_ctrl = gtk4::EventControllerKey::new();
+        key_ctrl.connect_key_pressed(move |_, key, _, _| match key {
+            gtk4::gdk::Key::Up => {
+                let mut s = state_key.borrow_mut();
+                let len = s.cmd_history.len();
+                if len == 0 {
+                    return gtk4::glib::Propagation::Proceed;
+                }
+                if s.history_pos.is_none() {
+                    s.history_draft = cmd_entry_key.text().to_string();
+                    s.history_pos = Some(len - 1);
+                } else if let Some(pos) = s.history_pos {
+                    if pos > 0 {
+                        s.history_pos = Some(pos - 1);
+                    }
+                }
+                if let Some(pos) = s.history_pos {
+                    let text = s.cmd_history[pos].clone();
+                    drop(s);
+                    cmd_entry_key.set_text(&text);
+                    cmd_entry_key.set_position(-1);
+                }
+                gtk4::glib::Propagation::Stop
+            }
+            gtk4::gdk::Key::Down => {
+                let mut s = state_key.borrow_mut();
+                if let Some(pos) = s.history_pos {
+                    if pos + 1 < s.cmd_history.len() {
+                        s.history_pos = Some(pos + 1);
+                        let text = s.cmd_history[pos + 1].clone();
+                        drop(s);
+                        cmd_entry_key.set_text(&text);
+                        cmd_entry_key.set_position(-1);
+                    } else {
+                        s.history_pos = None;
+                        let draft = s.history_draft.clone();
+                        drop(s);
+                        cmd_entry_key.set_text(&draft);
+                        cmd_entry_key.set_position(-1);
+                    }
+                }
+                gtk4::glib::Propagation::Stop
+            }
+            _ => gtk4::glib::Propagation::Proceed,
+        });
+        cmd_entry.add_controller(key_ctrl);
     }
 
     {
@@ -395,7 +859,19 @@ fn build_ui(app: &Application) {
 }
 
 fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
+    {
+        let mut s = state.borrow_mut();
+        // Don't push duplicate of the last entry
+        if s.cmd_history.last().map(|s| s.as_str()) != Some(cmd) {
+            s.cmd_history.push(cmd.to_string());
+        }
+        s.history_pos = None;
+        s.history_draft = String::new();
+    }
+
     let block = begin_cmd_block(state, &format!("$ {}", cmd));
+    // Jump to the newest command immediately, then again after output arrives.
+    scroll_output_to_bottom(state);
 
     if cmd == "pwd" {
         let cwd = state.borrow().cwd.display().to_string();
@@ -423,9 +899,15 @@ fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
 
     let cwd = state.borrow().cwd.clone();
     let mode = state.borrow().mode;
-    let (show_hidden, query) = {
+    let (show_hidden, query, sort_field, sort_order, folders_first) = {
         let s = state.borrow();
-        (s.show_hidden, s.search_query.clone())
+        (
+            s.show_hidden,
+            s.search_query.clone(),
+            s.sort_field,
+            s.sort_order,
+            s.folders_first,
+        )
     };
     let cmd_owned = cmd.to_string();
     let state_result = state.clone();
@@ -460,7 +942,15 @@ fn run_command(state: &Rc<RefCell<UiState>>, cmd: &str) {
                 combined.push_str(&String::from_utf8_lossy(&out.stderr));
 
                 if mode != RenderMode::Raw && cmd_owned.starts_with("ls") && out.status.success() {
-                    let entries = build_ls_entries_from_fs(&cwd, &cmd_owned, show_hidden, &query);
+                    let entries = build_ls_entries_from_fs(
+                        &cwd,
+                        &cmd_owned,
+                        show_hidden,
+                        &query,
+                        sort_field,
+                        sort_order,
+                        folders_first,
+                    );
                     if entries.is_empty() {
                         let parsed = parse_ls_entries(&combined, &cwd);
                         if parsed.is_empty() {
@@ -523,6 +1013,223 @@ fn scroll_output_to_bottom(state: &Rc<RefCell<UiState>>) {
     });
 }
 
+fn thumbnail_worker_count() -> usize {
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    cpus.clamp(2, 4)
+}
+
+fn start_thumbnail_workers(
+    job_rx: async_channel::Receiver<ThumbJob>,
+    result_tx: async_channel::Sender<ThumbResult>,
+    workers: usize,
+    disk_cache_max_bytes: u64,
+) {
+    for _ in 0..workers {
+        let rx = job_rx.clone();
+        let tx = result_tx.clone();
+        std::thread::spawn(move || {
+            while let Ok(job) = rx.recv_blocking() {
+                if let Ok(path) = video_thumbnail_path(&job.key.path, job.key.size) {
+                    let _ = tx.send_blocking(ThumbResult {
+                        key: job.key,
+                        generation: job.generation,
+                        thumb_path: path,
+                    });
+                }
+            }
+            prune_video_thumbnail_disk_cache(disk_cache_max_bytes);
+        });
+    }
+}
+
+fn register_thumb_widget(
+    state: &Rc<RefCell<UiState>>,
+    key: ThumbCacheKey,
+    picture: &Picture,
+    stack: &gtk4::Stack,
+) {
+    let pic_ref = gtk4::glib::WeakRef::<Picture>::new();
+    pic_ref.set(Some(picture));
+    let stack_ref = gtk4::glib::WeakRef::<gtk4::Stack>::new();
+    stack_ref.set(Some(stack));
+    let mut s = state.borrow_mut();
+    s.thumb_widgets
+        .entry(key)
+        .or_default()
+        .push(ThumbWidgetRefs {
+            picture: pic_ref,
+            stack: stack_ref,
+        });
+}
+
+fn queue_video_thumbnail_job(state: &Rc<RefCell<UiState>>, key: ThumbCacheKey) {
+    let (tx, generation, should_send) = {
+        let mut s = state.borrow_mut();
+        if s.thumb_pending.contains(&key) {
+            (s.thumb_job_tx.clone(), s.thumb_generation, false)
+        } else {
+            s.thumb_pending.insert(key.clone());
+            (s.thumb_job_tx.clone(), s.thumb_generation, true)
+        }
+    };
+    if !should_send {
+        return;
+    }
+    if tx
+        .try_send(ThumbJob {
+            key: key.clone(),
+            generation,
+        })
+        .is_err()
+    {
+        state.borrow_mut().thumb_pending.remove(&key);
+    }
+}
+
+fn thumbnail_cache_get(
+    state: &Rc<RefCell<UiState>>,
+    key: &ThumbCacheKey,
+) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
+    let mut s = state.borrow_mut();
+    if let Some(cached) = s.thumb_cache.get(key).map(|c| c.pixbuf.clone()) {
+        touch_thumbnail_lru(&mut s.thumb_lru, key);
+        return Some(cached);
+    }
+    None
+}
+
+fn thumbnail_cache_insert(s: &mut UiState, key: ThumbCacheKey, pixbuf: gtk4::gdk_pixbuf::Pixbuf) {
+    let bytes = estimate_pixbuf_bytes(&pixbuf);
+    if let Some(old) = s.thumb_cache.remove(&key) {
+        s.thumb_cache_bytes = s.thumb_cache_bytes.saturating_sub(old.bytes);
+    }
+    s.thumb_cache
+        .insert(key.clone(), CachedThumb { pixbuf, bytes });
+    s.thumb_cache_bytes = s.thumb_cache_bytes.saturating_add(bytes);
+    touch_thumbnail_lru(&mut s.thumb_lru, &key);
+    while s.thumb_cache.len() > THUMB_CACHE_MAX_ITEMS || s.thumb_cache_bytes > THUMB_CACHE_MAX_BYTES
+    {
+        if let Some(old_key) = s.thumb_lru.pop_front() {
+            if let Some(old) = s.thumb_cache.remove(&old_key) {
+                s.thumb_cache_bytes = s.thumb_cache_bytes.saturating_sub(old.bytes);
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+fn touch_thumbnail_lru(lru: &mut VecDeque<ThumbCacheKey>, key: &ThumbCacheKey) {
+    if let Some(pos) = lru.iter().position(|k| k == key) {
+        lru.remove(pos);
+    }
+    lru.push_back(key.clone());
+}
+
+fn estimate_pixbuf_bytes(pb: &gtk4::gdk_pixbuf::Pixbuf) -> usize {
+    (pb.rowstride().max(0) as usize).saturating_mul(pb.height().max(0) as usize)
+}
+
+fn handle_thumbnail_result(state: &Rc<RefCell<UiState>>, result: ThumbResult) {
+    let (key, thumb_path, refs_opt, current_generation) = {
+        let mut s = state.borrow_mut();
+        s.thumb_pending.remove(&result.key);
+        let refs = s.thumb_widgets.get(&result.key).cloned();
+        (result.key, result.thumb_path, refs, s.thumb_generation)
+    };
+    if result.generation != current_generation {
+        return;
+    }
+    let Some(refs) = refs_opt else {
+        return;
+    };
+    let size = key.size as i32;
+    let Ok(pb) = gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(&thumb_path, size, size, true) else {
+        return;
+    };
+    {
+        let mut s = state.borrow_mut();
+        thumbnail_cache_insert(&mut s, key.clone(), pb.clone());
+    }
+    for refs in refs {
+        if let (Some(picture), Some(stack)) = (refs.picture.upgrade(), refs.stack.upgrade()) {
+            picture.set_pixbuf(Some(&pb));
+            stack.set_visible_child_name("thumb");
+        }
+    }
+}
+
+fn purge_thumbnail_cache_outside_cwd(s: &mut UiState, cwd: &Path) {
+    let evict_keys: Vec<ThumbCacheKey> = s
+        .thumb_cache
+        .keys()
+        .filter(|k| !k.path.starts_with(cwd))
+        .cloned()
+        .collect();
+    for key in evict_keys {
+        if let Some(old) = s.thumb_cache.remove(&key) {
+            s.thumb_cache_bytes = s.thumb_cache_bytes.saturating_sub(old.bytes);
+        }
+        if let Some(pos) = s.thumb_lru.iter().position(|k| *k == key) {
+            s.thumb_lru.remove(pos);
+        }
+    }
+}
+
+fn maybe_prune_video_thumbnail_disk_cache(s: &mut UiState) {
+    if s.last_thumb_disk_prune.elapsed() < VIDEO_THUMB_DISK_PRUNE_INTERVAL {
+        return;
+    }
+    s.last_thumb_disk_prune = Instant::now();
+    std::thread::spawn(|| {
+        prune_video_thumbnail_disk_cache(VIDEO_THUMB_DISK_CACHE_MAX_BYTES);
+    });
+}
+
+fn prune_video_thumbnail_disk_cache(max_bytes: u64) {
+    let dir = thumbnail_cache_dir();
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return;
+    };
+
+    let mut files = Vec::new();
+    let mut total = 0u64;
+    for item in rd.flatten() {
+        let path = item.path();
+        let Ok(meta) = item.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let len = meta.len();
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        files.push((path, len, modified));
+        total = total.saturating_add(len);
+    }
+
+    if total <= max_bytes {
+        return;
+    }
+
+    files.sort_by_key(|(_, _, modified)| *modified);
+    for (path, len, _) in files {
+        if total <= max_bytes {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(len);
+        }
+    }
+}
+
 fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::FlowBox {
     let flow = gtk4::FlowBox::new();
     flow.add_css_class("noterm-list");
@@ -538,6 +1245,9 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
     for entry in entries.iter() {
         let tile_btn = Button::new();
         tile_btn.add_css_class("noterm-tile");
+        if state.borrow().selected_paths.contains(&entry.path) {
+            tile_btn.add_css_class("noterm-tile-selected");
+        }
         // Vertical layout: icon/thumbnail on top, name centered below.
         let h = GtkBox::new(Orientation::Vertical, 4);
         h.set_halign(gtk4::Align::Center);
@@ -550,28 +1260,55 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
             let s = state.borrow();
             (s.mode, s.icon_size)
         };
-        // Icons mode + image file: show a scaled thumbnail.
-        if mode == RenderMode::Icons && is_image(&entry.path) {
+        // Icons mode + media file: image decode is immediate, video thumbnailing is async.
+        if mode == RenderMode::Icons && (is_image(&entry.path) || is_video(&entry.path)) {
             let sz = icon_size as i32;
-            match gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(&entry.path, sz, sz, true) {
-                Ok(pb) => {
-                    let pic = Picture::new();
-                    pic.set_width_request(sz);
-                    pic.set_height_request(sz);
-                    pic.set_halign(gtk4::Align::Center);
-                    pic.set_content_fit(gtk4::ContentFit::Contain);
+            let icon_stack = gtk4::Stack::new();
+            icon_stack.set_width_request(sz);
+            icon_stack.set_height_request(sz);
+            icon_stack.set_halign(gtk4::Align::Center);
+            icon_stack.set_vexpand(false);
+
+            let icon_label = Label::new(None);
+            let pt = icon_size * 3 / 4;
+            icon_label.set_markup(&format!(
+                "<span font=\"{}\">{}</span>",
+                pt,
+                icon_for_file_emoji(&entry.path)
+            ));
+            icon_label.set_halign(gtk4::Align::Center);
+            icon_label.set_valign(gtk4::Align::Center);
+            icon_label.add_css_class("noterm-icon");
+
+            let pic = Picture::new();
+            pic.set_width_request(sz);
+            pic.set_height_request(sz);
+            pic.set_halign(gtk4::Align::Center);
+            pic.set_content_fit(gtk4::ContentFit::Contain);
+
+            icon_stack.add_named(&icon_label, Some("fallback"));
+            icon_stack.add_named(&pic, Some("thumb"));
+            icon_stack.set_visible_child_name("fallback");
+
+            if is_image(&entry.path) {
+                if let Ok(pb) =
+                    gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(&entry.path, sz, sz, true)
+                {
                     pic.set_pixbuf(Some(&pb));
-                    h.append(&pic);
+                    icon_stack.set_visible_child_name("thumb");
                 }
-                Err(_) => {
-                    let icon_label = Label::new(None);
-                    let pt = icon_size * 3 / 4;
-                    icon_label.set_markup(&format!("<span font=\"{}\">🖼️</span>", pt));
-                    icon_label.set_halign(gtk4::Align::Center);
-                    icon_label.add_css_class("noterm-icon");
-                    h.append(&icon_label);
+            } else {
+                let key = ThumbCacheKey::from_entry(entry, icon_size);
+                register_thumb_widget(state, key.clone(), &pic, &icon_stack);
+                if let Some(pb) = thumbnail_cache_get(state, &key) {
+                    pic.set_pixbuf(Some(&pb));
+                    icon_stack.set_visible_child_name("thumb");
+                } else {
+                    queue_video_thumbnail_job(state, key);
                 }
             }
+
+            h.append(&icon_stack);
         } else {
             let icon = icon_for_entry(mode, entry);
             if !icon.is_empty() {
@@ -605,6 +1342,20 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
             let state_click = state.clone();
             let entry_click = entry.clone();
             tile_btn.connect_clicked(move |_| {
+                {
+                    let mut s = state_click.borrow_mut();
+                    if s.batch_select_mode {
+                        if s.selected_paths.contains(&entry_click.path) {
+                            s.selected_paths.remove(&entry_click.path);
+                        } else {
+                            s.selected_paths.insert(entry_click.path.clone());
+                        }
+                        drop(s);
+                        refresh_ls_view(&state_click);
+                        update_status_bar(&state_click);
+                        return;
+                    }
+                }
                 if entry_click.kind == EntryKind::Directory {
                     navigate_to(&state_click, entry_click.path.clone());
                 } else {
@@ -618,6 +1369,9 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
             let state_dbl = state.clone();
             let click = gtk4::GestureClick::new();
             click.connect_pressed(move |_, n_press, _, _| {
+                if state_dbl.borrow().batch_select_mode {
+                    return;
+                }
                 if n_press == 2 {
                     open_with_system(&state_dbl, &path_dbl);
                 }
@@ -644,9 +1398,23 @@ fn build_ls_flow(state: &Rc<RefCell<UiState>>, entries: Vec<LsEntry>) -> gtk4::F
 }
 
 fn refresh_ls_view(state: &Rc<RefCell<UiState>>) {
-    let (cwd, mode, show_hidden, query) = {
-        let s = state.borrow();
-        (s.cwd.clone(), s.mode, s.show_hidden, s.search_query.clone())
+    let (cwd, mode, show_hidden, query, sort_field, sort_order, folders_first) = {
+        let mut s = state.borrow_mut();
+        s.thumb_generation = s.thumb_generation.wrapping_add(1);
+        s.thumb_widgets.clear();
+        s.thumb_pending.clear();
+        let cwd_keep = s.cwd.clone();
+        purge_thumbnail_cache_outside_cwd(&mut s, &cwd_keep);
+        maybe_prune_video_thumbnail_disk_cache(&mut s);
+        (
+            s.cwd.clone(),
+            s.mode,
+            s.show_hidden,
+            s.search_query.clone(),
+            s.sort_field,
+            s.sort_order,
+            s.folders_first,
+        )
     };
 
     let replacement: gtk4::Widget = if mode == RenderMode::Raw {
@@ -659,7 +1427,15 @@ fn refresh_ls_view(state: &Rc<RefCell<UiState>>) {
         view.buffer().set_text(&text);
         view.upcast()
     } else {
-        let entries = build_ls_entries_from_fs(&cwd, "ls", show_hidden, &query);
+        let entries = build_ls_entries_from_fs(
+            &cwd,
+            "ls",
+            show_hidden,
+            &query,
+            sort_field,
+            sort_order,
+            folders_first,
+        );
         build_ls_flow(state, entries).upcast()
     };
 
@@ -968,6 +1744,7 @@ fn parse_ls_entries(output: &str, cwd: &Path) -> Vec<LsEntry> {
         }
         let perms = parts[0].to_string();
         let size = parts[4].to_string();
+        let size_bytes = parts[4].parse::<u64>().unwrap_or(0);
         let modified = format!("{} {} {}", parts[5], parts[6], parts[7]);
         let name = parts[8..].join(" ");
         if name == "." || name == ".." {
@@ -985,13 +1762,23 @@ fn parse_ls_entries(output: &str, cwd: &Path) -> Vec<LsEntry> {
             kind,
             perms,
             size,
+            size_bytes,
             modified,
+            modified_epoch: 0,
         });
     }
     entries
 }
 
-fn build_ls_entries_from_fs(cwd: &Path, cmd: &str, show_hidden: bool, query: &str) -> Vec<LsEntry> {
+fn build_ls_entries_from_fs(
+    cwd: &Path,
+    cmd: &str,
+    show_hidden: bool,
+    query: &str,
+    sort_field: SortField,
+    sort_order: SortOrder,
+    folders_first: bool,
+) -> Vec<LsEntry> {
     let include_hidden = show_hidden || ls_show_hidden(cmd);
     let q = query.trim().to_lowercase();
     let target = ls_target_dir(cwd, cmd).unwrap_or_else(|| cwd.to_path_buf());
@@ -1009,7 +1796,9 @@ fn build_ls_entries_from_fs(cwd: &Path, cmd: &str, show_hidden: bool, query: &st
         kind: EntryKind::Directory,
         perms: "drwxr-xr-x".to_string(),
         size: "-".to_string(),
+        size_bytes: 0,
         modified: "-".to_string(),
+        modified_epoch: 0,
     });
 
     for item in rd.flatten() {
@@ -1044,14 +1833,65 @@ fn build_ls_entries_from_fs(cwd: &Path, cmd: &str, show_hidden: bool, query: &st
             kind,
             perms: perms_from_meta(&md, kind),
             size: human_size(md.len()),
+            size_bytes: md.len(),
             modified: modified_short(&md),
+            modified_epoch: modified_epoch(&md),
         });
     }
 
     if entries.len() > 1 {
-        entries[1..].sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        sort_entries(&mut entries[1..], sort_field, sort_order, folders_first);
     }
     entries
+}
+
+fn sort_entries(
+    entries: &mut [LsEntry],
+    sort_field: SortField,
+    sort_order: SortOrder,
+    folders_first: bool,
+) {
+    entries.sort_by(|a, b| {
+        if folders_first {
+            let a_is_dir = a.kind == EntryKind::Directory;
+            let b_is_dir = b.kind == EntryKind::Directory;
+            if a_is_dir != b_is_dir {
+                return b_is_dir.cmp(&a_is_dir);
+            }
+        }
+        let by_field = match sort_field {
+            SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            SortField::Type => type_sort_key(a).cmp(&type_sort_key(b)),
+            SortField::Size => a.size_bytes.cmp(&b.size_bytes),
+            SortField::Modified => a.modified_epoch.cmp(&b.modified_epoch),
+        };
+        let mut ord = if by_field == std::cmp::Ordering::Equal {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        } else {
+            by_field
+        };
+        if sort_order == SortOrder::Desc {
+            ord = ord.reverse();
+        }
+        ord
+    });
+}
+
+fn type_sort_key(entry: &LsEntry) -> String {
+    match entry.kind {
+        EntryKind::Directory => "0-dir".to_string(),
+        EntryKind::Symlink => "1-link".to_string(),
+        EntryKind::File => format!(
+            "2-{}",
+            entry
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase()
+        ),
+        EntryKind::Other => "9-other".to_string(),
+    }
 }
 
 fn ls_show_hidden(cmd: &str) -> bool {
@@ -1147,6 +1987,14 @@ fn modified_short(md: &std::fs::Metadata) -> String {
     secs.to_string()
 }
 
+fn modified_epoch(md: &std::fs::Metadata) -> u64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 fn icon_for_entry(mode: RenderMode, entry: &LsEntry) -> &'static str {
     match mode {
         RenderMode::Raw | RenderMode::Text => "",
@@ -1168,6 +2016,8 @@ fn icon_for_entry(mode: RenderMode, entry: &LsEntry) -> &'static str {
 fn icon_for_file_emoji(path: &Path) -> &'static str {
     if is_image(path) {
         "🖼️"
+    } else if is_video(path) {
+        "🎞️"
     } else if is_text(path) {
         "📄"
     } else {
@@ -1178,6 +2028,8 @@ fn icon_for_file_emoji(path: &Path) -> &'static str {
 fn nerd_for_file(path: &Path) -> &'static str {
     if is_image(path) {
         "\u{f71e}"
+    } else if is_video(path) {
+        "\u{f03d}"
     } else if is_text(path) {
         "\u{f15c}"
     } else {
@@ -1192,6 +2044,28 @@ fn is_image(path: &Path) -> bool {
             matches!(
                 e.to_ascii_lowercase().as_str(),
                 "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn is_video(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "mp4"
+                    | "mkv"
+                    | "webm"
+                    | "mov"
+                    | "avi"
+                    | "m4v"
+                    | "mpg"
+                    | "mpeg"
+                    | "wmv"
+                    | "flv"
+                    | "3gp"
             )
         })
         .unwrap_or(false)
@@ -1222,7 +2096,91 @@ fn is_text(path: &Path) -> bool {
 }
 
 fn is_previewable(path: &Path) -> bool {
-    is_image(path) || is_text(path)
+    is_image(path) || is_video(path) || is_text(path)
+}
+
+fn thumbnail_cache_dir() -> PathBuf {
+    rdm_common::config::config_dir().join("noterm-video-thumbnails")
+}
+
+fn thumbnail_cache_key(path: &Path, size: u32) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    size.hash(&mut hasher);
+    if let Ok(meta) = std::fs::metadata(path) {
+        meta.len().hash(&mut hasher);
+        if let Ok(modified) = meta.modified() {
+            if let Ok(age) = modified.duration_since(std::time::UNIX_EPOCH) {
+                age.as_secs().hash(&mut hasher);
+                age.subsec_nanos().hash(&mut hasher);
+            }
+        }
+    }
+    hasher.finish()
+}
+
+fn video_thumbnail_path(path: &Path, size: u32) -> Result<PathBuf, String> {
+    if !is_video(path) {
+        return Err("not a video file".to_string());
+    }
+    let cache_dir = thumbnail_cache_dir();
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("cache dir: {}", e))?;
+    let out = cache_dir.join(format!(
+        "{:016x}-{}.png",
+        thumbnail_cache_key(path, size),
+        size
+    ));
+    if out.exists() {
+        return Ok(out);
+    }
+
+    let thumb_ok = Command::new("ffmpegthumbnailer")
+        .arg("-i")
+        .arg(path)
+        .arg("-o")
+        .arg(&out)
+        .arg("-s")
+        .arg(size.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if thumb_ok && out.exists() {
+        return Ok(out);
+    }
+
+    let ffmpeg_ok = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-ss")
+        .arg("00:00:01")
+        .arg("-i")
+        .arg(path)
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-vf")
+        .arg(format!(
+            "scale={}:{}:force_original_aspect_ratio=decrease",
+            size, size
+        ))
+        .arg(&out)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ffmpeg_ok && out.exists() {
+        return Ok(out);
+    }
+
+    let _ = std::fs::remove_file(&out);
+    Err(format!(
+        "failed to generate thumbnail for {}",
+        path.display()
+    ))
 }
 
 fn noterm_mode_path() -> PathBuf {
@@ -1337,6 +2295,37 @@ fn update_preview(state: &Rc<RefCell<UiState>>, path: &Path) {
         }
     }
 
+    if is_video(path) {
+        match video_thumbnail_path(path, 640) {
+            Ok(thumb) => match gtk4::gdk_pixbuf::Pixbuf::from_file(&thumb) {
+                Ok(pb) => {
+                    s.preview_image.set_pixbuf(Some(&pb));
+                    s.preview_stack.set_visible_child_name("image");
+                }
+                Err(e) => {
+                    s.preview_image
+                        .set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
+                    s.preview_text
+                        .buffer()
+                        .set_text(&format!("Failed to load video thumbnail: {}", e));
+                    s.preview_stack.set_visible_child_name("text");
+                }
+            },
+            Err(e) => {
+                s.preview_image
+                    .set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
+                s.preview_text.buffer().set_text(&format!(
+                    "Video thumbnail unavailable: {}\n\nUse Open Externally to play this file.",
+                    e
+                ));
+                s.preview_stack.set_visible_child_name("text");
+            }
+        }
+        drop(s);
+        show_preview_panel(state);
+        return;
+    }
+
     if is_text(path) {
         s.preview_image
             .set_pixbuf(None::<&gtk4::gdk_pixbuf::Pixbuf>);
@@ -1381,6 +2370,7 @@ fn load_css() {
         .noterm-list row { padding: 4px 6px; }
         .noterm-tile { border: none; background: transparent; padding: 0; }
         .noterm-tile:hover { background: alpha(@theme_surface, 0.9); }
+        .noterm-tile-selected { background: alpha(@theme_selected_bg_color, 0.35); border-radius: 6px; }
         .noterm-breadcrumb { border: none; background: transparent; padding: 2px 6px; }
         .noterm-breadcrumb:hover { background: alpha(@theme_surface, 0.9); }
         .noterm-meta { opacity: 0.75; font-size: 11px; }
@@ -1453,9 +2443,17 @@ fn navigate_forward(state: &Rc<RefCell<UiState>>) {
 }
 
 fn update_status_bar(state: &Rc<RefCell<UiState>>) {
-    let (cwd, show_hidden) = {
+    let (cwd, show_hidden, selected_count, sort_field, sort_order, folders_first, batch_mode) = {
         let s = state.borrow();
-        (s.cwd.clone(), s.show_hidden)
+        (
+            s.cwd.clone(),
+            s.show_hidden,
+            s.selected_paths.len(),
+            s.sort_field,
+            s.sort_order,
+            s.folders_first,
+            s.batch_select_mode,
+        )
     };
     let mut total = 0usize;
     let mut hidden = 0usize;
@@ -1487,10 +2485,68 @@ fn update_status_bar(state: &Rc<RefCell<UiState>>) {
     } else {
         String::new()
     };
+    let selected_note = if selected_count > 0 {
+        format!("  •  {} selected", selected_count)
+    } else {
+        String::new()
+    };
+    let folders_note = if folders_first {
+        "folders first"
+    } else {
+        "mixed"
+    };
+    let batch_note = if batch_mode { "  •  batch on" } else { "" };
     state.borrow().status_label.set_text(&format!(
-        "{} items  ({} dirs, {} files){}",
-        visible, dirs, files, hidden_note
+        "{} items  ({} dirs, {} files){}{}{}  •  sort: {} ({}, {})",
+        visible,
+        dirs,
+        files,
+        hidden_note,
+        selected_note,
+        batch_note,
+        sort_field.label(),
+        sort_order.label(sort_field),
+        folders_note,
     ));
+}
+
+fn selected_paths_vec(state: &Rc<RefCell<UiState>>) -> Vec<PathBuf> {
+    state.borrow().selected_paths.iter().cloned().collect()
+}
+
+fn select_all_visible(state: &Rc<RefCell<UiState>>) {
+    let (cwd, show_hidden, query, sort_field, sort_order, folders_first) = {
+        let s = state.borrow();
+        (
+            s.cwd.clone(),
+            s.show_hidden,
+            s.search_query.clone(),
+            s.sort_field,
+            s.sort_order,
+            s.folders_first,
+        )
+    };
+    let entries = build_ls_entries_from_fs(
+        &cwd,
+        "ls",
+        show_hidden,
+        &query,
+        sort_field,
+        sort_order,
+        folders_first,
+    );
+    let mut selected = HashSet::new();
+    for e in entries {
+        if e.name != ".." {
+            selected.insert(e.path);
+        }
+    }
+    {
+        let mut s = state.borrow_mut();
+        s.selected_paths = selected;
+    }
+    refresh_ls_view(state);
+    update_status_bar(state);
 }
 
 fn open_with_system(state: &Rc<RefCell<UiState>>, path: &Path) {
@@ -1866,9 +2922,11 @@ lrwxrwxrwx 1 user user   10 Mar  5 12:02 link -> target
     #[test]
     fn file_type_detection() {
         assert!(is_image(Path::new("pic.png")));
+        assert!(is_video(Path::new("clip.mp4")));
         assert!(is_text(Path::new("readme.md")));
         assert!(!is_text(Path::new("archive.tar.gz")));
         assert!(is_previewable(Path::new("image.webp")));
+        assert!(is_previewable(Path::new("movie.mkv")));
         assert!(is_previewable(Path::new("main.rs")));
         assert!(!is_previewable(Path::new("binary.bin")));
     }
@@ -1881,7 +2939,9 @@ lrwxrwxrwx 1 user user   10 Mar  5 12:02 link -> target
             kind: EntryKind::Directory,
             perms: "drwxr-xr-x".to_string(),
             size: "4096".to_string(),
+            size_bytes: 4096,
             modified: "Mar 5 12:00".to_string(),
+            modified_epoch: 1,
         };
         let file = LsEntry {
             name: "f".to_string(),
@@ -1889,7 +2949,9 @@ lrwxrwxrwx 1 user user   10 Mar  5 12:02 link -> target
             kind: EntryKind::File,
             perms: "-rw-r--r--".to_string(),
             size: "1".to_string(),
+            size_bytes: 1,
             modified: "Mar 5 12:00".to_string(),
+            modified_epoch: 2,
         };
         assert_eq!(icon_for_entry(RenderMode::Raw, &dir), "");
         assert_eq!(icon_for_entry(RenderMode::Text, &dir), "");
@@ -1924,7 +2986,15 @@ lrwxrwxrwx 1 user user   10 Mar  5 12:02 link -> target
         std::fs::create_dir_all(root.join("child")).expect("mkdir");
         std::fs::write(root.join("a.txt"), "x").expect("write");
 
-        let entries = build_ls_entries_from_fs(&root, "ls", false, "");
+        let entries = build_ls_entries_from_fs(
+            &root,
+            "ls",
+            false,
+            "",
+            SortField::Name,
+            SortOrder::Asc,
+            true,
+        );
         assert!(!entries.is_empty());
         assert_eq!(entries[0].name, "..");
         assert_eq!(entries[0].kind, EntryKind::Directory);

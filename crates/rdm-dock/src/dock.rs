@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::Orientation;
 use rdm_common::config::{DockConfig, DockPin, RdmConfig};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -49,7 +49,7 @@ pub fn build_dock(
     mode: DockMode,
     shared: &Arc<Mutex<SharedState>>,
     action_tx: &Rc<std::sync::mpsc::Sender<ToplevelAction>>,
-) {
+) -> Box<dyn Fn()> {
     let icon_size = config.icon_size;
 
     // ── Permanent rdm-launcher pin (left of separator) ──
@@ -82,6 +82,17 @@ pub fn build_dock(
         update_dock(&slot_zone, &shared, &state, &action_tx, icon_size, mode);
         gtk4::glib::ControlFlow::Continue
     });
+
+    // ── Clock (right end) ──
+    let sep2 = gtk4::Separator::new(Orientation::Vertical);
+    sep2.add_css_class("dock-separator");
+    sep2.set_margin_top(10);
+    sep2.set_margin_bottom(10);
+    sep2.set_margin_start(4);
+    sep2.set_margin_end(4);
+    bar.append(&sep2);
+
+    build_clock(bar)
 }
 
 // ─── Permanent launcher pin ───────────────────────────────────────
@@ -519,6 +530,106 @@ fn resolve_icon_name(app_id: &str) -> String {
     } else {
         "application-x-executable".to_string()
     }
+}
+
+// ─── Clock ────────────────────────────────────────────────────────
+
+fn build_clock(bar: &gtk4::Box) -> Box<dyn Fn()> {
+    let time_label = gtk4::Label::new(None);
+    time_label.add_css_class("dock-clock-time");
+
+    let date_label = gtk4::Label::new(None);
+    date_label.add_css_class("dock-clock-date");
+
+    let vbox = gtk4::Box::new(Orientation::Vertical, 0);
+    vbox.add_css_class("dock-clock");
+    vbox.set_valign(gtk4::Align::Center);
+    vbox.set_margin_start(8);
+    vbox.set_margin_end(8);
+    vbox.append(&time_label);
+    vbox.append(&date_label);
+    bar.append(&vbox);
+
+    let use_24h = Rc::new(Cell::new(false));
+
+    update_clock(&time_label, &date_label, use_24h.get());
+
+    // Clone before the gesture closure moves use_24h — both Rcs point to the
+    // same Cell, so a mode change via the menu is immediately visible here too.
+    let use_24h_refresh = use_24h.clone();
+    let time_refresh = time_label.clone();
+    let date_refresh = date_label.clone();
+
+    let gesture = gtk4::GestureClick::new();
+    gesture.set_button(3);
+    let time_click = time_label.clone();
+    let date_click = date_label.clone();
+    let vbox_click = vbox.clone();
+    gesture.connect_released(move |_, _, _, _| {
+        show_clock_menu(&vbox_click, &time_click, &date_click, &use_24h);
+    });
+    vbox.add_controller(gesture);
+
+    Box::new(move || update_clock(&time_refresh, &date_refresh, use_24h_refresh.get()))
+}
+
+fn update_clock(time_label: &gtk4::Label, date_label: &gtk4::Label, use_24h: bool) {
+    let now = match gtk4::glib::DateTime::now_local() {
+        Ok(dt) => dt,
+        Err(_) => return,
+    };
+    let time_fmt = if use_24h { "%H:%M" } else { "%l:%M %p" };
+    if let Ok(t) = now.format(time_fmt) {
+        time_label.set_text(t.trim());
+    }
+    if let Ok(d) = now.format("%b %e") {
+        date_label.set_text(d.trim());
+    }
+}
+
+fn show_clock_menu(
+    parent: &gtk4::Box,
+    time_label: &gtk4::Label,
+    date_label: &gtk4::Label,
+    use_24h: &Rc<Cell<bool>>,
+) {
+    let popover = gtk4::Popover::new();
+    popover.set_parent(parent);
+    popover.set_autohide(true);
+
+    let vbox = gtk4::Box::new(Orientation::Vertical, 2);
+    vbox.set_margin_top(4);
+    vbox.set_margin_bottom(4);
+    vbox.set_margin_start(4);
+    vbox.set_margin_end(4);
+
+    let btn_12h = gtk4::Button::with_label("12-hour");
+    let btn_24h = gtk4::Button::with_label("24-hour");
+
+    let use_24h_12 = use_24h.clone();
+    let time_12 = time_label.clone();
+    let date_12 = date_label.clone();
+    let pop_12 = popover.clone();
+    btn_12h.connect_clicked(move |_| {
+        use_24h_12.set(false);
+        update_clock(&time_12, &date_12, false);
+        pop_12.popdown();
+    });
+
+    let use_24h_24 = use_24h.clone();
+    let time_24 = time_label.clone();
+    let date_24 = date_label.clone();
+    let pop_24 = popover.clone();
+    btn_24h.connect_clicked(move |_| {
+        use_24h_24.set(true);
+        update_clock(&time_24, &date_24, true);
+        pop_24.popdown();
+    });
+
+    vbox.append(&btn_12h);
+    vbox.append(&btn_24h);
+    popover.set_child(Some(&vbox));
+    popover.popup();
 }
 
 fn display_name_for(app_id: &str) -> String {

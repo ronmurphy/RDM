@@ -111,12 +111,12 @@ fn build_dock_window(
     bar.set_valign(gtk4::Align::End);
 
     let mode = dock::DockMode::from_str(&config.panel.taskbar_mode);
-    dock::build_dock(&bar, &config.dock, mode, shared_state, action_tx);
+    let clock_refresh = dock::build_dock(&bar, &config.dock, mode, shared_state, action_tx);
 
     window.set_child(Some(&bar));
     window.present();
 
-    setup_autohide(&window, &bar);
+    setup_autohide(&window, &bar, clock_refresh);
 
     window
 }
@@ -168,7 +168,7 @@ impl AutoHideState {
     }
 }
 
-fn setup_autohide(window: &ApplicationWindow, bar: &gtk4::Box) {
+fn setup_autohide(window: &ApplicationWindow, bar: &gtk4::Box, clock_refresh: Box<dyn Fn()>) {
     let state: Rc<RefCell<AutoHideState>> = Rc::new(RefCell::new(AutoHideState {
         position: 0.0,
         hovered: false,
@@ -234,6 +234,8 @@ fn setup_autohide(window: &ApplicationWindow, bar: &gtk4::Box) {
 
         bar.set_height_request(s.bar_height());
         win.set_opacity(s.opacity());
+
+        clock_refresh();
 
         gtk4::glib::ControlFlow::Continue
     });
