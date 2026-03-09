@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=RDM Plugin Installer
+Comment=Drag and drop a panel plugin (.so) onto this icon to install it to ~/.local/share/rdm/plugins/
+# Exec uses %F so file managers pass the dropped file path(s) as arguments
+Exec=rdm-plugin-install %F
+Icon=system-software-install
+Terminal=false
+Categories=System;Settings;
+MimeType=application/x-sharedlib;application/octet-stream;
+NoDisplay=false
+StartupNotify=false

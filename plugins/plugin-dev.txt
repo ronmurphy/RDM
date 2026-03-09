@@ -1,0 +1,186 @@
+RDM Panel Plugin Development Guide
+===================================
+
+Plugins are Rust cdylib crates compiled to .so shared libraries that rdm-panel
+loads at runtime.  The sysmon plugin (crates/rdm-panel-sysmon) is the reference
+implementation.  The hello plugin (crates/rdm-panel-hello) is the minimal example.
+
+
+─────────────────────────────────────────
+1. CREATE THE CRATE
+─────────────────────────────────────────
+
+    cargo new --lib crates/rdm-panel-myplugin
+
+Cargo.toml:
+
+    [package]
+    name    = "rdm-panel-myplugin"
+    version = "0.1.0"
+    edition = "2021"
+
+    [lib]
+    name       = "rdm_panel_myplugin"   # controls the .so filename
+    crate-type = ["cdylib"]
+
+    [dependencies]
+    gtk4          = { workspace = true }
+    rdm-panel-api = { workspace = true }
+
+Add the crate to the workspace Cargo.toml members list:
+
+    "crates/rdm-panel-myplugin",
+
+
+─────────────────────────────────────────
+2. IMPLEMENT THE FOUR REQUIRED SYMBOLS
+─────────────────────────────────────────
+
+Every plugin MUST export exactly these four C symbols.  All must use
+`extern "C-unwind"` — NOT `extern "C"`.  Using `extern "C"` silently
+disables panic unwinding (LLVM marks the function nounwind), which makes
+the entire process abort on any panic inside the plugin.
+
+src/lib.rs:
+
+    use gtk4::prelude::*;
+    use rdm_panel_api::RdmPluginInfo;
+    use std::cell::RefCell;
+
+    // Store widget instances here so they stay alive.
+    // GTK is single-threaded so thread_local! is the right tool.
+    thread_local! {
+        static INSTANCES: RefCell<Vec<gtk4::Button>> = RefCell::new(Vec::new());
+    }
+
+    #[no_mangle]
+    pub extern "C-unwind" fn rdm_plugin_info() -> RdmPluginInfo {
+        RdmPluginInfo {
+            name: c"myplugin".as_ptr(),   // must match `name` in rdm.toml
+            version: 1,
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C-unwind" fn rdm_plugin_new_instance(
+        _config_toml: *const std::ffi::c_char,
+    ) -> *mut gtk4::ffi::GtkWidget {
+        // REQUIRED: each .so links its own copy of gtk4-rs whose
+        // "is GTK initialized?" flag starts false.  This call syncs it.
+        unsafe { gtk4::set_initialized(); }
+
+        let btn = gtk4::Button::with_label("My Plugin");
+        btn.add_css_class("tray-btn");
+        let raw = btn.upcast_ref::<gtk4::Widget>().as_ptr();
+
+        // REQUIRED: store the Rust value so the raw pointer stays valid.
+        // If you let the value drop here, rdm-panel crashes on g_object_ref.
+        INSTANCES.with(|v| v.borrow_mut().push(btn));
+        raw
+    }
+
+    #[no_mangle]
+    pub extern "C-unwind" fn rdm_plugin_remove_instances() {
+        INSTANCES.with(|v| v.borrow_mut().clear());
+    }
+
+    #[no_mangle]
+    pub extern "C-unwind" fn rdm_plugin_exit() {
+        INSTANCES.with(|v| v.borrow_mut().clear());
+    }
+
+
+─────────────────────────────────────────
+3. THE THREE RULES (learn these the hard way)
+─────────────────────────────────────────
+
+Rule 1 — Use `extern "C-unwind"` not `extern "C"`.
+    extern "C" causes the compiler to mark the function nounwind, which means
+    std::panic::catch_unwind inside it is silently a no-op and any panic
+    kills the entire process.  "C-unwind" preserves unwind tables.
+
+Rule 2 — Call `unsafe { gtk4::set_initialized(); }` at the top of new_instance.
+    Each .so that links gtk4-rs gets its own copy of the crate, including its
+    own "GTK is initialised" flag that starts as false.  Without this call,
+    any GTK widget construction panics with:
+        "GTK has not been initialized. Call `gtk::init` first."
+
+Rule 3 — Keep every returned widget alive in thread_local!.
+    rdm-panel calls g_object_ref on the raw pointer you return.  If the Rust
+    value was already dropped (refcount hit 0), that's a use-after-free crash
+    inside GTK's C code.  Store the widget in thread_local! RefCell<Vec<...>>
+    and only clear it in remove_instances / exit.
+
+
+─────────────────────────────────────────
+4. READING CONFIG FROM rdm.toml
+─────────────────────────────────────────
+
+rdm.toml:
+
+    [[panel.plugins]]
+    name     = "myplugin"
+    position = "right"        # left | center | right
+
+    [panel.plugins.config]
+    my_option = "hello"
+    count     = 5
+
+In new_instance, config_toml is a null-terminated TOML string of the
+[panel.plugins.config] table (or NULL if no config section).
+
+    let config_str = if config_toml.is_null() {
+        None
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(config_toml).to_str().ok() }
+    };
+    // Parse with the `toml` crate:
+    if let Some(src) = config_str {
+        if let Ok(val) = src.parse::<toml::Value>() {
+            // val["my_option"], val["count"], etc.
+        }
+    }
+
+Add `toml = { workspace = true }` to your Cargo.toml dependencies.
+
+
+─────────────────────────────────────────
+5. BUILD & INSTALL
+─────────────────────────────────────────
+
+Debug build (for testing):
+
+    cargo build -p rdm-panel-myplugin
+    cp target/debug/librdm_panel_myplugin.so ~/.local/share/rdm/plugins/
+
+Release build via buildall:
+
+    ./buildall.sh --plugins --release
+
+The .so search order at runtime:
+    1. ~/.local/share/rdm/plugins/
+    2. /usr/local/lib/rdm/plugins/
+    3. /usr/lib/rdm/plugins/
+    4. <binary dir>/rdm-plugins/
+
+After copying, run `rdm-reload` from a terminal in the RDM session to
+hot-reload the panel.
+
+
+─────────────────────────────────────────
+6. TIPS FOR POPOVERS (like sysmon)
+─────────────────────────────────────────
+
+Use gtk4::MenuButton as your panel widget — it handles the popover toggle
+automatically.  See crates/rdm-panel-sysmon/src/lib.rs for a full example
+with background threads, async-channel, and glib::spawn_future_local.
+
+Store the MenuButton (not a Button) in INSTANCES:
+
+    thread_local! {
+        static INSTANCES: RefCell<Vec<gtk4::MenuButton>> = RefCell::new(Vec::new());
+    }
+
+For background work (e.g. reading /proc), spawn a std::thread, send results
+back through async_channel, and receive them with glib::spawn_future_local
+so all GTK updates happen on the main thread.

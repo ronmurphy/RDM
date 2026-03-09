@@ -1,6 +1,7 @@
 mod clock;
 mod dbusmenu;
-mod process_popup;
+mod plugin_loader;
+// mod process_popup; // replaced by rdm-panel-sysmon plugin
 mod sni;
 mod taskbar;
 mod toplevel;
@@ -55,6 +56,12 @@ fn main() {
         .application_id("org.rdm.panel")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
+
+    // Load external plugins once before the GTK app starts.  We only load
+    // plugins whose names appear in the config so unused .so files are ignored.
+    let wanted: Vec<String> = config.panel.plugins.iter().map(|p| p.name.clone()).collect();
+    let wanted_opt = if wanted.is_empty() { None } else { Some(wanted.as_slice()) };
+    plugin_loader::load_plugins(wanted_opt);
 
     let cfg = config.clone();
     app.connect_activate(move |app| build_panel(app, &cfg));
@@ -282,7 +289,8 @@ fn build_panel_window(
     } else {
         None
     };
-    let task_popup_widget = process_popup::build_task_popup_widget();
+    // Built-in sysmon replaced by rdm-panel-sysmon plugin.
+    // let task_popup_widget = process_popup::build_task_popup_widget();
 
     // Right: unified tray area — SNI app icons on the left, battery/power on the right.
     let sni_tray = sni::setup_sni_tray();
@@ -318,14 +326,14 @@ fn build_panel_window(
             &right_zone,
         );
     }
-    append_panel_widget(
-        &layout,
-        "sys_popup",
-        &task_popup_widget,
-        &left_zone,
-        &center_zone,
-        &right_zone,
-    );
+    // append_panel_widget(
+    //     &layout,
+    //     "sys_popup",
+    //     &task_popup_widget,
+    //     &left_zone,
+    //     &center_zone,
+    //     &right_zone,
+    // );
     append_panel_widget(
         &layout,
         "tray",
@@ -334,6 +342,28 @@ fn build_panel_window(
         &center_zone,
         &right_zone,
     );
+
+    // Instantiate external plugins declared in config.
+    for plugin_entry in &config.panel.plugins {
+        let config_toml = if plugin_entry.config.is_empty() {
+            None
+        } else {
+            toml::to_string(&plugin_entry.config).ok()
+        };
+        match plugin_loader::new_instance(&plugin_entry.name, config_toml.as_deref()) {
+            Some(widget) => {
+                match plugin_entry.position.as_str() {
+                    "center" => center_zone.append(&widget),
+                    "right" => right_zone.append(&widget),
+                    _ => left_zone.append(&widget),
+                }
+                log::info!("plugin '{}' widget added to panel ({})", plugin_entry.name, plugin_entry.position);
+            }
+            None => {
+                log::warn!("plugin '{}' did not produce a widget", plugin_entry.name);
+            }
+        }
+    }
 
     window.set_child(Some(&center_box));
 

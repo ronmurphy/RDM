@@ -20,6 +20,76 @@ err()   { echo -e "${RED}  ✗ $1${NC}"; exit 1; }
 
 cd "$SCRIPT_DIR"
 
+# ── --plugins mode ────────────────────────────────────────────────────────────
+# Build only plugin cdylib crates and stage .so files into plugins/
+
+if [[ "${1:-}" == "--plugins" ]]; then
+    RELEASE=0
+    [[ "${2:-}" == "--release" ]] && RELEASE=1
+
+    if [[ $RELEASE -eq 1 ]]; then
+        CARGO_ARGS="--release"
+        TARGET_DIR="$SCRIPT_DIR/target/release"
+        BUILD_TYPE="release"
+    else
+        CARGO_ARGS=""
+        TARGET_DIR="$SCRIPT_DIR/target/debug"
+        BUILD_TYPE="debug"
+    fi
+
+    echo -e "${BOLD}"
+    echo "  ╔══════════════════════════════════════╗"
+    echo "  ║     RDM Desktop — Plugin Builder     ║"
+    echo "  ╚══════════════════════════════════════╝"
+    echo -e "${NC}"
+    info "Build type: $BUILD_TYPE"
+
+    PLUGIN_CRATES=()
+    for dir in "$SCRIPT_DIR"/crates/rdm-panel-*/; do
+        name="$(basename "$dir")"
+        [[ "$name" == "rdm-panel-api" ]] && continue
+        PLUGIN_CRATES+=("$name")
+    done
+
+    if [[ ${#PLUGIN_CRATES[@]} -eq 0 ]]; then
+        echo "No plugin crates found under crates/rdm-panel-*/"
+        exit 0
+    fi
+
+    info "Plugins found: ${PLUGIN_CRATES[*]}"
+
+    PLUGINS_DIR="$SCRIPT_DIR/plugins"
+    mkdir -p "$PLUGINS_DIR"
+
+    STAGED=0
+    for crate in "${PLUGIN_CRATES[@]}"; do
+        info "Building $crate ($BUILD_TYPE)..."
+        cargo build $CARGO_ARGS -p "$crate"
+        ok "Built $crate"
+
+        lib_name="${crate//-/_}"
+        so_src="$TARGET_DIR/lib${lib_name}.so"
+        so_dst="$PLUGINS_DIR/lib${lib_name}.so"
+
+        if [[ -f "$so_src" ]]; then
+            cp "$so_src" "$so_dst"
+            ok "Staged → plugins/lib${lib_name}.so  ($(du -h "$so_dst" | cut -f1))"
+            STAGED=$((STAGED + 1))
+        else
+            err "lib${lib_name}.so not found in $TARGET_DIR"
+        fi
+    done
+
+    echo ""
+    echo -e "${GREEN}${BOLD}  ✓ $STAGED plugin(s) built and staged in plugins/${NC}"
+    echo ""
+    echo "  To install for the current user:"
+    echo "    mkdir -p ~/.local/share/rdm/plugins"
+    echo "    cp plugins/*.so ~/.local/share/rdm/plugins/"
+    echo ""
+    exit 0
+fi
+
 # Auto-increment build number
 BUILD_FILE="$SCRIPT_DIR/.build_number"
 if [ -f "$BUILD_FILE" ]; then

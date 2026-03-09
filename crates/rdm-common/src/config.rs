@@ -47,6 +47,37 @@ pub struct PanelConfig {
     /// Taskbar display mode: "text", "icons", "nerd"
     #[serde(default = "default_taskbar_mode")]
     pub taskbar_mode: String,
+    /// External panel plugins loaded from shared libraries.
+    #[serde(default)]
+    pub plugins: Vec<PluginEntry>,
+}
+
+/// One entry under `[[panel.plugins]]` in rdm.toml.
+///
+/// Example:
+/// ```toml
+/// [[panel.plugins]]
+/// name = "sysmon"            # must match rdm_plugin_info().name
+/// position = "right"         # "left" | "center" | "right"
+///
+/// [panel.plugins.config]
+/// interval_ms = 1000
+/// show_cpu    = true
+/// ```
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PluginEntry {
+    /// Plugin name — used to locate the `.so` file and match `rdm_plugin_info`.
+    pub name: String,
+    /// Which panel zone this plugin appears in: "left", "center", or "right".
+    #[serde(default = "default_plugin_position")]
+    pub position: String,
+    /// Arbitrary TOML table forwarded verbatim to the plugin as a TOML string.
+    #[serde(default)]
+    pub config: toml::Table,
+}
+
+fn default_plugin_position() -> String {
+    "right".to_string()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -188,6 +219,7 @@ impl Default for PanelConfig {
             show_workspaces: true,
             clock_format: default_clock_format(),
             taskbar_mode: default_taskbar_mode(),
+            plugins: Vec::new(),
         }
     }
 }

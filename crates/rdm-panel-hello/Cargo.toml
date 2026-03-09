@@ -1,0 +1,12 @@
+[package]
+name    = "rdm-panel-hello"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name       = "rdm_panel_hello"
+crate-type = ["cdylib"]
+
+[dependencies]
+gtk4         = { workspace = true }
+rdm-panel-api = { workspace = true }

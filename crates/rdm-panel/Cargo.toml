@@ -19,3 +19,7 @@ env_logger = { workspace = true }
 freedesktop-desktop-entry = { workspace = true }
 async-channel = { workspace = true }
 rdm-common = { workspace = true }
+rdm-panel-api = { workspace = true }
+libloading = { workspace = true }
+dirs = { workspace = true }
+toml = { workspace = true }
