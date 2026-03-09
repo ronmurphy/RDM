@@ -98,9 +98,19 @@
     <keybind key="W-S-s">
       <action name="Execute" command="rdm-screenshot full" />
     </keybind>
+    <!-- Super+Alt+S: capture current monitor only -->
+    <keybind key="W-A-s">
+      <action name="Execute" command="rdm-screenshot output" />
+    </keybind>
     <!-- Print Screen: capture all monitors -->
     <keybind key="Print">
       <action name="Execute" command="rdm-screenshot full" />
+    </keybind>
+
+    <!-- ==================== Screen Lock ==================== -->
+    <!-- Super+L: lock screen -->
+    <keybind key="W-l">
+      <action name="Execute" command="swaylock -f -c 1a1b26" />
     </keybind>
 
     <!-- ==================== Volume (multimedia keys) ==================== -->

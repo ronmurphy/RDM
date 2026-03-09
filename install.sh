@@ -107,9 +107,10 @@ sudo install -Dm755 scripts/rdm-start      "$PREFIX/bin/rdm-start"
 sudo install -Dm755 scripts/rdm-reload     "$PREFIX/bin/rdm-reload"
 sudo install -Dm755 scripts/rdm-screenshot "$PREFIX/bin/rdm-screenshot"
 sudo install -Dm755 scripts/rdm-volume     "$PREFIX/bin/rdm-volume"
+sudo install -Dm755 scripts/rdm-idle-inhibit "$PREFIX/bin/rdm-idle-inhibit"
 sudo install -Dm755 plugins/rdm-plugin-install.sh "$PREFIX/bin/rdm-plugin-install"
 
-ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume, rdm-plugin-install"
+ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume, rdm-idle-inhibit, rdm-plugin-install"
 
 # ─── Install session entry ─────────────────────────────────────
 

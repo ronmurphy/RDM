@@ -23,4 +23,17 @@ show_preview = true
 
 [idle]
 enabled = true
-screen_off_secs = 300   # 5 minutes — blank screen, any input wakes it
+screen_off_secs = 300           # 5 minutes — blank screen, any input wakes it
+lock_timeout_secs = 600         # 10 minutes — lock screen (0 = no auto-lock)
+lock_before_sleep = true        # lock before suspend/sleep
+idle_inhibit_on_audio = true    # don't blank screen while audio/video is playing
+
+# ── Panel Plugins ──────────────────────────────────────────────
+
+[[panel.plugins]]
+name     = "clipboard"
+position = "right"
+
+[[panel.plugins]]
+name     = "sysmon"
+position = "right"

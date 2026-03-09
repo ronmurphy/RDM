@@ -11,6 +11,9 @@ export DESKTOP_SESSION=RDM
 export XDG_SESSION_TYPE=wayland
 export RDM_SESSION=1
 
+# Portal: tell xdg-desktop-portal to use the wlr backend (screenshots, screencasting)
+export XDG_CURRENT_DESKTOP="wlroots:RDM"
+
 # Ensure config directory exists
 RDM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"
 mkdir -p "$RDM_CONFIG_DIR"
@@ -29,6 +32,13 @@ LABWC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/labwc"
 mkdir -p "$LABWC_DIR"
 if [ -f "$SCRIPT_DIR/../config/labwc-rc.xml" ] && [ ! -f "$LABWC_DIR/rc.xml" ]; then
     cp "$SCRIPT_DIR/../config/labwc-rc.xml" "$LABWC_DIR/rc.xml"
+fi
+
+# Deploy xdg-desktop-portal config so the wlr backend activates for RDM
+PORTAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal"
+mkdir -p "$PORTAL_DIR"
+if [ -f "$SCRIPT_DIR/../config/rdm-portals.conf" ] && [ ! -f "$PORTAL_DIR/portals.conf" ]; then
+    cp "$SCRIPT_DIR/../config/rdm-portals.conf" "$PORTAL_DIR/portals.conf"
 fi
 
 # labwc autostart file — launches rdm-session which manages everything else

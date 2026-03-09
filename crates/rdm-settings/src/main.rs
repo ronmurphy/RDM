@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, DropDown, Entry, Label,
-    Orientation, StringList, Switch, TextView,
+    Application, ApplicationWindow, Box as GtkBox, Button, CheckButton, CssProvider, DropDown,
+    Entry, Label, Orientation, StringList, Switch, TextView,
 };
 use rdm_common::config::RdmConfig;
 use rdm_common::theme::{
@@ -120,6 +120,10 @@ fn build_ui(app: &Application) {
     // --- Displays page ---
     let displays_page = build_displays_page(&config);
     stack.add_titled(&displays_page, Some("displays"), "Displays");
+
+    // --- Plugins page ---
+    let plugins_page = build_plugins_page();
+    stack.add_titled(&plugins_page, Some("plugins"), "Plugins");
 
     // --- Diagnostics page ---
     let diagnostics_page = build_diagnostics_page();
@@ -2182,6 +2186,362 @@ fn set_dock_autostart(enabled: bool) {
 
     if let Err(e) = std::fs::write(&path, new_content) {
         log::error!("Failed to write session.toml: {}", e);
+    }
+}
+
+// ─── Plugin Management ───────────────────────────────────────────
+
+/// Discovered plugin on disk.
+#[derive(Clone, Debug)]
+struct DiscoveredPlugin {
+    name: String,
+    _path: String,
+}
+
+/// A plugin entry in the settings UI.
+#[derive(Clone, Debug)]
+struct PluginRow {
+    name: String,
+    enabled: bool,
+    position: String,
+}
+
+/// Search paths for plugin .so files (mirrors rdm-panel's plugin_loader).
+fn plugin_search_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local/share/rdm/plugins"));
+    }
+    paths.push(std::path::PathBuf::from("/usr/local/lib/rdm/plugins"));
+    paths.push(std::path::PathBuf::from("/usr/lib/rdm/plugins"));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            paths.push(dir.join("rdm-plugins"));
+        }
+    }
+    paths
+}
+
+/// Extract plugin name from .so filename.
+/// "librdm_panel_clipboard.so" → "clipboard"
+fn plugin_name_from_filename(filename: &str) -> Option<String> {
+    let stem = filename.strip_suffix(".so")?;
+    let name = stem.strip_prefix("librdm_panel_").unwrap_or(stem);
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.replace('_', "-"))
+}
+
+/// Discover all .so plugin files on disk.
+fn discover_plugins() -> Vec<DiscoveredPlugin> {
+    let mut found = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for dir in plugin_search_paths() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(ext) = path.extension() else { continue };
+            if ext != "so" { continue; }
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            if let Some(name) = plugin_name_from_filename(&filename) {
+                if seen.insert(name.clone()) {
+                    found.push(DiscoveredPlugin {
+                        name,
+                        _path: path.to_string_lossy().to_string(),
+                    });
+                }
+            }
+        }
+    }
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found
+}
+
+fn rdm_toml_path() -> std::path::PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join(".config/rdm/rdm.toml")
+}
+
+/// Read current enabled plugins from rdm.toml.
+fn read_enabled_plugins() -> Vec<rdm_common::config::PluginEntry> {
+    RdmConfig::load().panel.plugins
+}
+
+/// Rewrite ONLY the [[panel.plugins]] section in rdm.toml, preserving other config.
+fn save_plugin_entries(rows: &[PluginRow]) {
+    let path = rdm_toml_path();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("Failed to read rdm.toml: {}", e);
+            return;
+        }
+    };
+
+    let lines: Vec<&str> = content.lines().collect();
+    let mut output: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+
+        // Skip existing plugin section header comment
+        if trimmed.starts_with("# ── Panel Plugins") || trimmed.starts_with("# ─── Panel Plugins") {
+            i += 1;
+            if i < lines.len() && lines[i].trim().is_empty() { i += 1; }
+            continue;
+        }
+
+        // Skip active [[panel.plugins]] block
+        if trimmed == "[[panel.plugins]]" {
+            i += 1;
+            while i < lines.len() {
+                let lt = lines[i].trim();
+                if lt.is_empty() || lt.starts_with("[[") || (lt.starts_with('[') && !lt.starts_with("[panel.plugins")) {
+                    break;
+                }
+                i += 1;
+            }
+            if i < lines.len() && lines[i].trim().is_empty() { i += 1; }
+            continue;
+        }
+
+        // Skip commented-out plugin block
+        if trimmed == "#[[panel.plugins]]" {
+            i += 1;
+            while i < lines.len() {
+                let lt = lines[i].trim();
+                if lt.is_empty() { break; }
+                if !lt.starts_with('#') { break; }
+                let un = lt.trim_start_matches('#').trim();
+                if un.starts_with("name") || un.starts_with("position") {
+                    i += 1;
+                    continue;
+                }
+                break;
+            }
+            if i < lines.len() && lines[i].trim().is_empty() { i += 1; }
+            continue;
+        }
+
+        output.push(lines[i].to_string());
+        i += 1;
+    }
+
+    // Trim trailing blanks
+    while output.last().map_or(false, |l| l.trim().is_empty()) {
+        output.pop();
+    }
+
+    // Append plugin section
+    output.push(String::new());
+    output.push("# ── Panel Plugins ──────────────────────────────────────────────".to_string());
+    output.push(String::new());
+
+    for row in rows {
+        if row.enabled {
+            output.push("[[panel.plugins]]".to_string());
+            output.push(format!("name     = \"{}\"", row.name));
+            output.push(format!("position = \"{}\"", row.position));
+        } else {
+            output.push("#[[panel.plugins]]".to_string());
+            output.push(format!("#name     = \"{}\"", row.name));
+            output.push(format!("#position = \"{}\"", row.position));
+        }
+        output.push(String::new());
+    }
+
+    let new_content = output.join("\n") + "\n";
+    if let Err(e) = std::fs::write(&path, new_content) {
+        log::error!("Failed to write rdm.toml: {}", e);
+    }
+}
+
+fn build_plugins_page() -> GtkBox {
+    let page = GtkBox::new(Orientation::Vertical, 0);
+    page.set_margin_top(20);
+    page.set_margin_bottom(20);
+    page.set_margin_start(20);
+    page.set_margin_end(20);
+
+    let header = Label::new(Some("Panel Plugins"));
+    header.add_css_class("settings-header");
+    header.set_halign(gtk4::Align::Start);
+    page.append(&header);
+
+    let hint = Label::new(Some(
+        "Enable, disable, and reorder panel plugins. Changes take effect after Save & Reload.",
+    ));
+    hint.add_css_class("settings-hint");
+    hint.set_halign(gtk4::Align::Start);
+    hint.set_margin_bottom(12);
+    hint.set_wrap(true);
+    page.append(&hint);
+
+    // Merge discovered plugins with current config
+    let discovered = discover_plugins();
+    let enabled_entries = read_enabled_plugins();
+
+    let mut rows: Vec<PluginRow> = Vec::new();
+
+    // Enabled plugins first (preserve config order)
+    for entry in &enabled_entries {
+        rows.push(PluginRow {
+            name: entry.name.clone(),
+            enabled: true,
+            position: entry.position.clone(),
+        });
+    }
+
+    // Newly discovered plugins that aren't enabled yet
+    for disc in &discovered {
+        if !rows.iter().any(|r| r.name == disc.name) {
+            rows.push(PluginRow {
+                name: disc.name.clone(),
+                enabled: false,
+                position: "right".to_string(),
+            });
+        }
+    }
+
+    let rows_state = Rc::new(RefCell::new(rows));
+    let list_container = Rc::new(GtkBox::new(Orientation::Vertical, 0));
+    let status_label = Rc::new(Label::new(None));
+    status_label.set_halign(gtk4::Align::Start);
+    status_label.set_margin_top(8);
+
+    rebuild_plugin_list(&list_container, &rows_state, &status_label);
+    page.append(list_container.as_ref());
+
+    // Bottom buttons
+    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+    btn_box.set_margin_top(12);
+    btn_box.set_halign(gtk4::Align::End);
+
+    let save_btn = Button::with_label("Save & Reload");
+    save_btn.add_css_class("suggested-action");
+    let rs = rows_state.clone();
+    let sl = status_label.clone();
+    save_btn.connect_clicked(move |_| {
+        save_plugin_entries(&rs.borrow());
+        let _ = std::process::Command::new("rdm-reload").status();
+        sl.set_text("Saved and reloading…");
+    });
+    btn_box.append(&save_btn);
+    page.append(&btn_box);
+    page.append(status_label.as_ref());
+
+    page
+}
+
+fn rebuild_plugin_list(
+    container: &Rc<GtkBox>,
+    rows_state: &Rc<RefCell<Vec<PluginRow>>>,
+    status_label: &Rc<Label>,
+) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+
+    let rows = rows_state.borrow();
+
+    for (idx, row) in rows.iter().enumerate() {
+        let row_box = GtkBox::new(Orientation::Horizontal, 8);
+        row_box.set_margin_top(4);
+        row_box.set_margin_bottom(4);
+
+        // Enabled checkbox
+        let check = CheckButton::new();
+        check.set_active(row.enabled);
+        {
+            let rs = rows_state.clone();
+            let cont = container.clone();
+            let sl = status_label.clone();
+            check.connect_toggled(move |cb| {
+                rs.borrow_mut()[idx].enabled = cb.is_active();
+                rebuild_plugin_list(&cont, &rs, &sl);
+            });
+        }
+        row_box.append(&check);
+
+        // Plugin name
+        let name_label = Label::new(Some(&row.name));
+        name_label.set_halign(gtk4::Align::Start);
+        name_label.set_hexpand(true);
+        name_label.set_width_chars(18);
+        if !row.enabled {
+            name_label.set_opacity(0.5);
+        }
+        row_box.append(&name_label);
+
+        // Position dropdown
+        let positions = StringList::new(&["left", "center", "right"]);
+        let pos_dd = DropDown::new(Some(positions), gtk4::Expression::NONE);
+        pos_dd.set_selected(match row.position.as_str() {
+            "left" => 0,
+            "center" => 1,
+            _ => 2,
+        });
+        pos_dd.set_sensitive(row.enabled);
+        {
+            let rs = rows_state.clone();
+            pos_dd.connect_selected_notify(move |dd| {
+                let pos = match dd.selected() {
+                    0 => "left",
+                    1 => "center",
+                    _ => "right",
+                };
+                rs.borrow_mut()[idx].position = pos.to_string();
+            });
+        }
+        row_box.append(&pos_dd);
+
+        // Up button
+        let up_btn = Button::with_label("▲");
+        up_btn.set_sensitive(idx > 0);
+        up_btn.set_tooltip_text(Some("Move up"));
+        {
+            let rs = rows_state.clone();
+            let cont = container.clone();
+            let sl = status_label.clone();
+            up_btn.connect_clicked(move |_| {
+                {
+                    let mut r = rs.borrow_mut();
+                    if idx > 0 { r.swap(idx, idx - 1); }
+                }
+                rebuild_plugin_list(&cont, &rs, &sl);
+            });
+        }
+        row_box.append(&up_btn);
+
+        // Down button
+        let down_btn = Button::with_label("▼");
+        down_btn.set_sensitive(idx < rows.len() - 1);
+        down_btn.set_tooltip_text(Some("Move down"));
+        {
+            let rs = rows_state.clone();
+            let cont = container.clone();
+            let sl = status_label.clone();
+            down_btn.connect_clicked(move |_| {
+                {
+                    let mut r = rs.borrow_mut();
+                    if idx < r.len() - 1 { r.swap(idx, idx + 1); }
+                }
+                rebuild_plugin_list(&cont, &rs, &sl);
+            });
+        }
+        row_box.append(&down_btn);
+
+        container.append(&row_box);
+    }
+
+    if rows.is_empty() {
+        let empty = Label::new(Some("No plugins found. Place .so files in ~/.local/share/rdm/plugins/"));
+        empty.add_css_class("settings-hint");
+        empty.set_margin_top(20);
+        container.append(&empty);
     }
 }
 

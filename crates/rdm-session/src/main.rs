@@ -366,6 +366,13 @@ fn spawn_process(entry: &AutostartEntry) -> Option<Child> {
             return None;
         }
         idle_args
+    } else if entry.command == "rdm-idle-inhibit" {
+        let config = rdm_common::config::RdmConfig::load();
+        if !config.idle.idle_inhibit_on_audio {
+            log::info!("idle_inhibit_on_audio disabled, skipping rdm-idle-inhibit");
+            return None;
+        }
+        entry.args.clone()
     } else {
         entry.args.clone()
     };
@@ -404,6 +411,13 @@ fn build_swayidle_args() -> Vec<String> {
     // -w flag: also react to logind idle hints (lock screen, lid switch, etc.)
     args.push("-w".to_string());
 
+    // Lock screen after lock_timeout_secs of inactivity
+    if idle.lock_timeout_secs > 0 {
+        args.push("timeout".to_string());
+        args.push(idle.lock_timeout_secs.to_string());
+        args.push("swaylock -f -c 1a1b26".to_string());
+    }
+
     // Screen off: DPMS off after screen_off_secs, resume on input
     if idle.screen_off_secs > 0 {
         args.push("timeout".to_string());
@@ -411,6 +425,12 @@ fn build_swayidle_args() -> Vec<String> {
         args.push("wlopm --off '*'".to_string());
         args.push("resume".to_string());
         args.push("wlopm --on '*'".to_string());
+    }
+
+    // Lock before system sleep/suspend
+    if idle.lock_before_sleep {
+        args.push("before-sleep".to_string());
+        args.push("swaylock -f -c 1a1b26".to_string());
     }
 
     log::info!("swayidle args: {:?}", args);

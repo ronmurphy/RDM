@@ -121,6 +121,15 @@ pub struct IdleConfig {
     /// Mouse movement or keyboard input will wake the display.
     #[serde(default = "default_idle_screen_off")]
     pub screen_off_secs: u64,
+    /// Seconds of inactivity before the screen locks (0 = no auto-lock).
+    #[serde(default = "default_idle_lock")]
+    pub lock_timeout_secs: u64,
+    /// Lock the screen before the system suspends.
+    #[serde(default = "default_true")]
+    pub lock_before_sleep: bool,
+    /// When true, inhibit idle timeout while audio or video is playing.
+    #[serde(default = "default_true")]
+    pub idle_inhibit_on_audio: bool,
 }
 
 impl Default for IdleConfig {
@@ -128,12 +137,19 @@ impl Default for IdleConfig {
         Self {
             enabled: true,
             screen_off_secs: default_idle_screen_off(),
+            lock_timeout_secs: default_idle_lock(),
+            lock_before_sleep: true,
+            idle_inhibit_on_audio: true,
         }
     }
 }
 
 fn default_idle_screen_off() -> u64 {
     300 // 5 minutes
+}
+
+fn default_idle_lock() -> u64 {
+    600 // 10 minutes
 }
 
 fn default_legacy_config_schema_version() -> u32 {

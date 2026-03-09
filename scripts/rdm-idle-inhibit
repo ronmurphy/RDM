@@ -1,0 +1,79 @@
+#!/bin/bash
+# rdm-idle-inhibit — Prevent screen timeout while audio/video is playing.
+# Part of the RDM Desktop Environment.
+#
+# Detection: checks PipeWire / PulseAudio for RUNNING sink-inputs
+#            (covers both audio playback and video with audio tracks).
+#
+# Inhibit methods (tried in order):
+#   1. sway-audio-idle-inhibit  — purpose-built Wayland idle inhibitor
+#   2. pactl + wlrctl           — poll audio, reset compositor idle timer
+#   3. pactl + ydotool          — poll audio, reset idle via synthetic input
+#
+# Note: most video players (mpv, VLC) and browsers in fullscreen already
+# send Wayland idle-inhibit signals.  This script catches the cases where
+# audio is playing without a fullscreen video surface (e.g. music, a
+# YouTube tab in a normal window, etc.).
+
+set -euo pipefail
+
+POLL_INTERVAL=30  # seconds between checks when audio is playing
+
+log() {
+    logger -t rdm-idle-inhibit "$*"
+}
+
+# ── Method 1: sway-audio-idle-inhibit (best) ──────────────────────────
+if command -v sway-audio-idle-inhibit &>/dev/null; then
+    log "Using sway-audio-idle-inhibit"
+    exec sway-audio-idle-inhibit
+fi
+
+# ── Need pactl for fallback methods ───────────────────────────────────
+if ! command -v pactl &>/dev/null; then
+    log "pactl not found — cannot monitor audio.  Install pipewire-pulse or pulseaudio-utils."
+    exit 1
+fi
+
+# ── Pick a method to reset the idle timer ─────────────────────────────
+reset_idle=""
+if command -v wlrctl &>/dev/null; then
+    # Zero-delta pointer move — resets compositor idle timer without
+    # visibly moving the cursor.
+    reset_idle="wlrctl pointer move 0 0"
+elif command -v ydotool &>/dev/null; then
+    reset_idle="ydotool mousemove -x 0 -y 0"
+fi
+
+if [ -z "$reset_idle" ]; then
+    log "Neither wlrctl nor ydotool found — cannot reset idle timer.  Install one of them, or install sway-audio-idle-inhibit."
+    exit 1
+fi
+
+log "Fallback mode: polling pactl every ${POLL_INTERVAL}s, reset via: $reset_idle"
+
+# ── Audio detection ───────────────────────────────────────────────────
+is_audio_playing() {
+    # A sink-input in RUNNING state means audio data is actively flowing.
+    pactl list sink-inputs 2>/dev/null | grep -qi "state:.*running"
+}
+
+# ── Main loop ─────────────────────────────────────────────────────────
+inhibited=false
+
+while true; do
+    if is_audio_playing; then
+        if [ "$inhibited" = false ]; then
+            log "Audio playing — inhibiting idle"
+            inhibited=true
+        fi
+        # Reset the idle timer so swayidle doesn't trigger
+        $reset_idle 2>/dev/null || true
+    else
+        if [ "$inhibited" = true ]; then
+            log "Audio stopped — allowing idle"
+            inhibited=false
+        fi
+    fi
+    sleep "$POLL_INTERVAL"
+done

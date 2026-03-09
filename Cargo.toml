@@ -4,6 +4,7 @@ members = [
     "crates/rdm-panel-api",
     "crates/rdm-panel-sysmon",
     "crates/rdm-panel-hello",
+    "crates/rdm-panel-clipboard",
     "crates/rdm-launcher",
     "crates/rdm-snap",
     "crates/rdm-session",
@@ -12,7 +13,7 @@ members = [
     "crates/rdm-settings",
     "crates/rdm-notify",
     "crates/rdm-noterm",
-    "crates/rdm-editor",
+    # "crates/rdm-editor",  # removed — heavy deps (webkit6, sourceview5)
     "crates/rdm-dock",
 ]
 resolver = "2"

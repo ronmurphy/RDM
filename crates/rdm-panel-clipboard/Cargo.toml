@@ -1,0 +1,15 @@
+[package]
+name = "rdm-panel-clipboard"
+version.workspace = true
+edition.workspace = true
+
+# Must be cdylib so rdm-panel can load it with libloading at runtime.
+[lib]
+name = "rdm_panel_clipboard"
+crate-type = ["cdylib"]
+
+[dependencies]
+rdm-panel-api = { workspace = true }
+gtk4 = { workspace = true }
+async-channel = { workspace = true }
+toml = { workspace = true }

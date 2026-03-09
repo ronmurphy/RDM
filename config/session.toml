@@ -37,6 +37,18 @@ command = "swayidle"
 args = []
 restart = true
 
+[[autostart]]
+name = "rdm-idle-inhibit"
+command = "rdm-idle-inhibit"
+args = []
+restart = true
+
+[[autostart]]
+name = "polkit-gnome"
+command = "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1"
+args = []
+restart = true
+
 # Uncomment to auto-start the snap daemon:
 # [[autostart]]
 # name = "rdm-snap"
