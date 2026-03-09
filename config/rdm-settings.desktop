@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=RDM Settings
+GenericName=System Settings
+Comment=Configure the RDM Desktop Environment
+Exec=rdm-settings
+Icon=rdm-settings
+Terminal=false
+Categories=Settings;DesktopSettings;GTK;
+Keywords=settings;preferences;configuration;theme;display;rdm;
+StartupNotify=true
+StartupWMClass=rdm-settings

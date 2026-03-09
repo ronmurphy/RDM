@@ -46,6 +46,12 @@ impl Default for SessionConfig {
                     restart: true,
                 },
                 AutostartEntry {
+                    name: "rdm-dock".into(),
+                    command: "rdm-dock".into(),
+                    args: vec![],
+                    restart: true,
+                },
+                AutostartEntry {
                     name: "swaybg".into(),
                     command: "swaybg".into(),
                     args: vec!["-c".into(), "#1a1b26".into()],
@@ -121,6 +127,9 @@ async fn main() {
             log::info!("SIGTERM received — shutting down session manager");
             stop_all(&mut processes);
             cleanup_pid_file();
+            // Tell labwc to exit, completing the logout
+            log::info!("Requesting labwc exit...");
+            let _ = Command::new("labwc").arg("--exit").status();
             break;
         }
 

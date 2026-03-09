@@ -46,6 +46,7 @@ BINARIES=(
     rdm-reload
     rdm-screenshot
     rdm-volume
+    rdm-dock
 )
 
 for bin in "${BINARIES[@]}"; do

@@ -270,6 +270,11 @@ fn build_panel_window(
     taskbar_box.set_halign(gtk4::Align::Center);
     let mode = taskbar::TaskbarMode::from_str(&config.panel.taskbar_mode);
     taskbar::setup_taskbar_with_shared(&taskbar_box, mode, shared_state, action_tx);
+    // Invisible mode: widget still tracks windows (needed for toggle/minimize
+    // actions to work), but is not rendered and takes no panel space.
+    if layout.panel.taskbar_hidden {
+        taskbar_box.set_visible(false);
+    }
 
     // Right: clock (with calendar popover), optional.
     let clock_widget = if config.panel.show_clock {

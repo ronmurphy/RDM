@@ -443,6 +443,57 @@ stacksidebar row:selected {
     color: @theme_contrast_fg;
 }
 
+/* ── Dock ──────────────────────────────────────────────────────── */
+window.rdm-dock {
+    background-color: transparent;
+}
+
+.dock-bar {
+    background-color: transparent;
+    padding: 4px 8px;
+}
+
+.dock-item {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0 2px;
+}
+
+.dock-btn {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    padding: 4px;
+    min-height: 0;
+    min-width: 0;
+    transition: background-color 100ms ease, transform 100ms ease;
+}
+
+.dock-btn:hover {
+    background-color: alpha(@theme_surface, 0.6);
+}
+
+.dock-btn.running {
+    background-color: alpha(@theme_active, 0.25);
+}
+
+.dock-btn.active-window {
+    background-color: alpha(@theme_accent, 0.35);
+}
+
+.dock-dots {
+    padding: 2px 0 0 0;
+}
+
+.dock-dot {
+    background-color: @theme_accent;
+    border-radius: 50%;
+    min-width: 4px;
+    min-height: 4px;
+    margin: 0 2px;
+}
+
 /* ── Watermark ─────────────────────────────────────────────────── */
 .watermark {
     color: @theme_subtle;

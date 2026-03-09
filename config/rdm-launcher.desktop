@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=RDM Launcher
+GenericName=Application Launcher
+Comment=Launch applications in the RDM Desktop Environment
+Exec=rdm-launcher
+Icon=rdm-launcher
+Terminal=false
+Categories=GTK;System;
+Keywords=launcher;apps;applications;search;rdm;
+StartupNotify=false
+StartupWMClass=rdm-launcher

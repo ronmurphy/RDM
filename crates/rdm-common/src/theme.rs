@@ -45,6 +45,11 @@ pub struct PanelLayout {
     pub sys_popup: String,
     #[serde(default = "default_right")]
     pub tray: String,
+    /// When true the taskbar widget is invisible — it still runs and tracks
+    /// windows, but takes no visual space.  Use when rdm-dock replaces the
+    /// taskbar role.
+    #[serde(default)]
+    pub taskbar_hidden: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -95,6 +100,7 @@ impl Default for PanelLayout {
             clock: default_right(),
             sys_popup: default_right(),
             tray: default_right(),
+            taskbar_hidden: false,
         }
     }
 }

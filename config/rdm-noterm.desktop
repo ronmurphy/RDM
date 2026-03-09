@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=RDM NoTerm
+GenericName=File Manager
+Comment=RDM hybrid terminal and file manager
+Exec=rdm-noterm
+Icon=rdm-noterm
+Terminal=false
+Categories=FileManager;System;GTK;
+Keywords=files;terminal;file manager;browser;rdm;noterm;
+StartupNotify=true
+StartupWMClass=rdm-noterm

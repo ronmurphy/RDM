@@ -28,6 +28,8 @@ pub struct RdmConfig {
     pub idle: IdleConfig,
     #[serde(default)]
     pub editor: EditorConfig,
+    #[serde(default)]
+    pub dock: DockConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -297,6 +299,60 @@ impl Default for EditorConfig {
     }
 }
 
+// ─── Dock ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DockPin {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub exec: String,
+    #[serde(default)]
+    pub icon: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DockConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_dock_icon_size")]
+    pub icon_size: i32,
+    #[serde(default = "default_dock_pins")]
+    pub pins: Vec<DockPin>,
+}
+
+fn default_dock_icon_size() -> i32 {
+    48
+}
+
+fn default_dock_pins() -> Vec<DockPin> {
+    vec![
+        DockPin { name: "Files".into(), exec: "thunar".into(), icon: "system-file-manager".into() },
+        DockPin { name: "Terminal".into(), exec: "foot".into(), icon: "utilities-terminal".into() },
+        DockPin { name: "Firefox".into(), exec: "firefox".into(), icon: "firefox".into() },
+    ]
+}
+
+impl Default for DockConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            icon_size: default_dock_icon_size(),
+            pins: default_dock_pins(),
+        }
+    }
+}
+
+impl Default for DockPin {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            exec: String::new(),
+            icon: String::new(),
+        }
+    }
+}
+
 impl Default for RdmConfig {
     fn default() -> Self {
         Self {
@@ -310,6 +366,7 @@ impl Default for RdmConfig {
             displays: Vec::new(),
             idle: IdleConfig::default(),
             editor: EditorConfig::default(),
+            dock: DockConfig::default(),
         }
     }
 }

@@ -777,6 +777,53 @@ fn build_theme_editor_page(
         });
     }
 
+    // Hide Taskbar toggle
+    let hide_taskbar_lbl = Label::new(Some("Hide Taskbar"));
+    hide_taskbar_lbl.set_halign(gtk4::Align::Start);
+    settings_grid.attach(&hide_taskbar_lbl, 0, row, 1, 1);
+    let hide_taskbar_switch = Switch::new();
+    hide_taskbar_switch.set_halign(gtk4::Align::Start);
+    hide_taskbar_switch.set_active(false);
+    settings_grid.attach(&hide_taskbar_switch, 1, row, 1, 1);
+    row += 1;
+    {
+        let layout = theme_layout.clone();
+        hide_taskbar_switch.connect_state_set(move |_, state| {
+            layout.borrow_mut().panel.taskbar_hidden = state;
+            gtk4::glib::Propagation::Proceed
+        });
+    }
+
+    // Hide Dock toggle — edits [[autostart]] entry in session.toml
+    let hide_dock_lbl = Label::new(Some("Hide Dock"));
+    hide_dock_lbl.set_halign(gtk4::Align::Start);
+    settings_grid.attach(&hide_dock_lbl, 0, row, 1, 1);
+    let hide_dock_switch = Switch::new();
+    hide_dock_switch.set_halign(gtk4::Align::Start);
+    hide_dock_switch.set_active(!dock_autostart_enabled());
+    settings_grid.attach(&hide_dock_switch, 1, row, 1, 1);
+    row += 1;
+    {
+        hide_dock_switch.connect_state_set(move |_, state| {
+            // state=true → Hide Dock ON → disable autostart + kill
+            // state=false → Hide Dock OFF → enable autostart + spawn
+            set_dock_autostart(!state);
+            if state {
+                let _ = std::process::Command::new("pkill")
+                    .arg("-x")
+                    .arg("rdm-dock")
+                    .status();
+            } else {
+                let _ = std::process::Command::new("rdm-dock")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+            gtk4::glib::Propagation::Proceed
+        });
+    }
+
     let panel_clock_dd = attach_layout_row(&settings_grid, &mut row, "Panel: Clock", &["left", "center", "right"], 2);
     {
         let layout = theme_layout.clone();
@@ -877,6 +924,7 @@ fn build_theme_editor_page(
     let panel_tray_dd_for_load = panel_tray_dd.clone();
     let launcher_fav_dd_for_load = launcher_fav_dd.clone();
     let launcher_settings_dd_for_load = launcher_settings_dd.clone();
+    let hide_taskbar_switch_for_load = hide_taskbar_switch.clone();
 
     // Loads the selected theme's colors into the grid
     let populate_grid = Rc::new(move |idx: u32| {
@@ -924,6 +972,7 @@ fn build_theme_editor_page(
                 0
             },
         );
+        hide_taskbar_switch_for_load.set_active(loaded_layout.panel.taskbar_hidden);
         // Default the new-theme name to "<base>-custom"
         if name_for_load.text().is_empty() {
             name_for_load.set_text(&format!("{}-custom", slug));
@@ -2084,6 +2133,56 @@ fn apply_changes(config: &RdmConfig) {
     // Hot-reload: rdm-session kills all children and restarts them.
     // swaybg args are built from rdm.toml, so wallpaper is applied automatically.
     let _ = std::process::Command::new("rdm-reload").status();
+}
+
+// ─── Dock autostart helpers ───────────────────────────────────────
+
+fn session_toml_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(|h| std::path::PathBuf::from(h).join(".config/rdm/session.toml"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/session.toml"))
+}
+
+const DOCK_BLOCK: &str = "[[autostart]]\nname = \"rdm-dock\"\ncommand = \"rdm-dock\"\nargs = []\nrestart = true";
+const DOCK_BLOCK_COMMENTED: &str = "#[[autostart]]\n#name = \"rdm-dock\"\n#command = \"rdm-dock\"\n#args = []\n#restart = true";
+
+/// Returns true if the rdm-dock [[autostart]] block is present and uncommented.
+fn dock_autostart_enabled() -> bool {
+    let Ok(content) = std::fs::read_to_string(session_toml_path()) else {
+        return false;
+    };
+    content.contains(DOCK_BLOCK)
+}
+
+/// Add/uncomment or remove/comment the rdm-dock [[autostart]] block in session.toml.
+fn set_dock_autostart(enabled: bool) {
+    let path = session_toml_path();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("Failed to read session.toml: {}", e);
+            return;
+        }
+    };
+
+    let new_content = if enabled {
+        if content.contains(DOCK_BLOCK_COMMENTED) {
+            content.replace(DOCK_BLOCK_COMMENTED, DOCK_BLOCK)
+        } else if content.contains(DOCK_BLOCK) {
+            content // already enabled
+        } else {
+            // Block absent entirely — append it
+            format!("{}\n{}\n", content.trim_end(), DOCK_BLOCK)
+        }
+    } else if content.contains(DOCK_BLOCK) {
+        content.replace(DOCK_BLOCK, DOCK_BLOCK_COMMENTED)
+    } else {
+        content // already disabled / absent
+    };
+
+    if let Err(e) = std::fs::write(&path, new_content) {
+        log::error!("Failed to write session.toml: {}", e);
+    }
 }
 
 fn load_css() {

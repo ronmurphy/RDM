@@ -94,9 +94,10 @@ sudo install -Dm755 target/release/rdm-snap       "$PREFIX/bin/rdm-snap"
 sudo install -Dm755 target/release/rdm-watermark  "$PREFIX/bin/rdm-watermark"
 sudo install -Dm755 target/release/rdm-settings   "$PREFIX/bin/rdm-settings"
 sudo install -Dm755 target/release/rdm-notify    "$PREFIX/bin/rdm-notify"
-sudo install -Dm755 target/release/rdm-editor    "$PREFIX/bin/rdm-editor"
+sudo install -Dm755 target/release/rdm-dock      "$PREFIX/bin/rdm-dock"
+#sudo install -Dm755 target/release/rdm-editor    "$PREFIX/bin/rdm-editor"#
 
-ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-editor"
+ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-dock, rdm-editor"
 
 # ─── Install scripts ───────────────────────────────────────────
 
@@ -113,11 +114,25 @@ ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume"
 
 info "Registering RDM as a Wayland session..."
 
-sudo install -Dm644 config/rdm.desktop        /usr/share/wayland-sessions/rdm.desktop
-sudo install -Dm644 config/rdm-editor.desktop /usr/share/applications/rdm-editor.desktop
+sudo install -Dm644 config/rdm.desktop           /usr/share/wayland-sessions/rdm.desktop
+sudo install -Dm644 config/rdm-editor.desktop    /usr/share/applications/rdm-editor.desktop
+sudo install -Dm644 config/rdm-settings.desktop  /usr/share/applications/rdm-settings.desktop
+sudo install -Dm644 config/rdm-noterm.desktop    /usr/share/applications/rdm-noterm.desktop
+sudo install -Dm644 config/rdm-launcher.desktop  /usr/share/applications/rdm-launcher.desktop
 
 ok "Session entry: /usr/share/wayland-sessions/rdm.desktop"
-ok "App entry:     /usr/share/applications/rdm-editor.desktop"
+ok "App entries:   rdm-editor, rdm-settings, rdm-noterm, rdm-launcher"
+
+# ─── Install icons ─────────────────────────────────────────
+
+info "Installing icons..."
+
+sudo install -Dm644 assets/rdm-settings.svg  /usr/share/icons/hicolor/scalable/apps/rdm-settings.svg
+sudo install -Dm644 assets/rdm-noterm.svg    /usr/share/icons/hicolor/scalable/apps/rdm-noterm.svg
+sudo install -Dm644 assets/rdm-launcher.svg  /usr/share/icons/hicolor/scalable/apps/rdm-launcher.svg
+sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+
+ok "rdm-settings.svg, rdm-noterm.svg, rdm-launcher.svg → /usr/share/icons/hicolor/scalable/apps/"
 
 # ─── Install D-Bus service for rdm-notify ──────────────────────
 

@@ -14,16 +14,22 @@ args = []
 restart = true
 
 [[autostart]]
-name = "swaybg"
-command = "swaybg"
-args = ["-c", "#1a1b26"]
-restart = false
-
-[[autostart]]
 name = "rdm-notify"
 command = "rdm-notify"
 args = []
 restart = true
+
+#[[autostart]]
+#name = "rdm-dock"
+#command = "rdm-dock"
+#args = []
+#restart = true
+
+[[autostart]]
+name = "swaybg"
+command = "swaybg"
+args = ["-c", "#1a1b26"]
+restart = false
 
 [[autostart]]
 name = "swayidle"

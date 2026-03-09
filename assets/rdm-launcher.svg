@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <filter id="rs" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#00000060"/>
+    </filter>
+    <!-- Rocket body gradient: bright left edge to slightly darker right -->
+    <linearGradient id="rbody" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#F4F4F8"/>
+      <stop offset="100%" stop-color="#D4D4E0"/>
+    </linearGradient>
+    <!-- Flame gradient: yellow core → orange → transparent -->
+    <radialGradient id="flame" cx="50%" cy="30%" r="70%">
+      <stop offset="0%"   stop-color="#FFE040"/>
+      <stop offset="45%"  stop-color="#FF8020"/>
+      <stop offset="100%" stop-color="#FF4000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ── Isometric cube ── -->
+  <!-- Top face -->
+  <polygon points="256,104 134,178 256,252 378,178" fill="#D05828"/>
+  <line x1="256" y1="104" x2="378" y2="178" stroke="#E87248" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="256" y1="104" x2="134" y2="178" stroke="#C04820" stroke-width="2"   stroke-linecap="round"/>
+
+  <!-- Left face -->
+  <polygon points="134,178 256,252 256,408 134,334" fill="#A83A1A"/>
+  <polygon points="134,178 256,252 256,272 134,198" fill="#FFFFFF14"/>
+  <line x1="134" y1="334" x2="256" y2="408" stroke="#7A2212" stroke-width="2"/>
+
+  <!-- Right face -->
+  <polygon points="256,252 378,178 378,334 256,408" fill="#782010"/>
+  <polygon points="256,384 378,310 378,334 256,408" fill="#00000030"/>
+  <line x1="378" y1="334" x2="256" y2="408" stroke="#4E1408" stroke-width="2"/>
+
+  <!-- Seam edges -->
+  <line x1="256" y1="252" x2="256" y2="408" stroke="#5C1A0C" stroke-width="2"/>
+  <line x1="134" y1="178" x2="134" y2="334" stroke="#7A2A12" stroke-width="1.5"/>
+  <line x1="378" y1="178" x2="378" y2="334" stroke="#4A1208" stroke-width="1.5"/>
+
+  <!-- ── Rocket ── (floats in front of the cube) -->
+
+  <!-- Exhaust flame — drawn first so the rocket body sits on top -->
+  <ellipse cx="256" cy="396" rx="28" ry="34" fill="url(#flame)"/>
+  <ellipse cx="256" cy="402" rx="16" ry="22" fill="#FFE040" opacity="0.7"/>
+
+  <!-- Nozzle bell -->
+  <path d="M 238,368 Q 234,382 228,390 L 284,390 Q 278,382 274,368 Z"
+        fill="#B8B8CC"/>
+  <line x1="238" y1="368" x2="274" y2="368" stroke="#9090A8" stroke-width="2.5"/>
+
+  <!-- Left fin -->
+  <path d="M 218,330 L 178,382 L 218,368 Z" fill="#CACAD8" filter="url(#rs)"/>
+
+  <!-- Right fin -->
+  <path d="M 294,330 L 334,382 L 294,368 Z" fill="#CACAD8" filter="url(#rs)"/>
+
+  <!-- Rocket body (nose cone + cylinder as one path) -->
+  <!-- Nose: M tip  C curve out to shoulder  body rect below -->
+  <path d="M 256,196
+           C 256,196 294,222 294,264
+           L 294,368 L 218,368 L 218,264
+           C 218,222 256,196 256,196 Z"
+        fill="url(#rbody)" filter="url(#rs)"/>
+
+  <!-- Body centre line (subtle depth) -->
+  <line x1="256" y1="220" x2="256" y2="368"
+        stroke="#B0B0C4" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Porthole ring -->
+  <circle cx="256" cy="296" r="26" fill="#5EB8F5" stroke="white" stroke-width="5"
+          filter="url(#rs)"/>
+  <!-- Porthole glass interior -->
+  <circle cx="256" cy="296" r="18" fill="#3A98E0"/>
+  <!-- Porthole glint -->
+  <ellipse cx="249" cy="289" rx="7" ry="5" fill="white" opacity="0.55"
+           transform="rotate(-30 249 289)"/>
+
+  <!-- Stripes (two thin accent bands) -->
+  <rect x="218" y="314" width="76" height="8" rx="2" fill="#D05828" opacity="0.55"/>
+  <rect x="218" y="338" width="76" height="6" rx="2" fill="#D05828" opacity="0.35"/>
+</svg>

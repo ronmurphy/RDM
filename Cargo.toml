@@ -10,6 +10,7 @@ members = [
     "crates/rdm-notify",
     "crates/rdm-noterm",
     "crates/rdm-editor",
+    "crates/rdm-dock",
 ]
 resolver = "2"
 

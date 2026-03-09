@@ -33,20 +33,21 @@ fi
 
 # labwc autostart file — launches rdm-session which manages everything else
 AUTOSTART="$LABWC_DIR/autostart"
-cat > "$AUTOSTART" << 'EOF'
+cat > "$AUTOSTART" << 'AUTOSTART_EOF'
 #!/bin/sh
 # RDM autostart — managed by rdm-start
 # Only launch rdm-session when running as the RDM desktop environment
 if [ "$RDM_SESSION" != "1" ]; then
     exit 0
 fi
-# Guard: don't launch a second session manager
-if pgrep -x rdm-session >/dev/null 2>&1; then
-    exit 0
-fi
 LOG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/rdm.log"
+# Kill any zombie rdm-session from a previous incomplete logout, then start fresh
+if pgrep -x rdm-session >/dev/null 2>&1; then
+    pkill -x rdm-session 2>/dev/null || true
+    sleep 0.5
+fi
 rdm-session >> "$LOG_FILE" 2>&1 &
-EOF
+AUTOSTART_EOF
 chmod +x "$AUTOSTART"
 
 echo "Starting RDM Desktop (labwc compositor)..."

@@ -45,14 +45,17 @@ echo -e "${NC}"
 CRATES=(
     rdm-session
     rdm-panel
+    rdm-dock
     rdm-launcher
     rdm-noterm
     rdm-settings
     rdm-snap
     rdm-watermark
     rdm-notify
-    rdm-editor
+#    rdm-editor
 )
+
+# i may discontinue Editor, so let's not build it for now. it's a bit of a pain to maintain and test, and i don't use it myself. if there's demand for it in the future, i can always add it back.
 
 TOTAL=${#CRATES[@]}
 COUNT=0
