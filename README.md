@@ -13,7 +13,9 @@ A lightweight, modular Wayland desktop environment built from scratch in **Rust 
 
 ## Screenshots
 
-> *Coming soon*
+Desktop, with applications launcher and settings opened.
+<img width="1438" height="602" alt="Screenshot_20260309-202526" src="https://github.com/user-attachments/assets/813104d9-e399-4c65-b185-6df7192b126a" />
+
 
 ---
 
