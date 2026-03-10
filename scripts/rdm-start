@@ -19,26 +19,44 @@ RDM_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"
 mkdir -p "$RDM_CONFIG_DIR"
 
 # Copy default configs if not present
+# Check source tree first (dev), then installed share dir (production)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/../config/rdm.toml" ] && [ ! -f "$RDM_CONFIG_DIR/rdm.toml" ]; then
-    cp "$SCRIPT_DIR/../config/rdm.toml" "$RDM_CONFIG_DIR/rdm.toml"
+SOURCE_CONFIG="$SCRIPT_DIR/../config"
+INSTALLED_CONFIG="/usr/local/share/rdm"
+
+# Helper: find the first existing copy of a config file
+find_default() {
+    if [ -f "$SOURCE_CONFIG/$1" ]; then
+        echo "$SOURCE_CONFIG/$1"
+    elif [ -f "$INSTALLED_CONFIG/$1" ]; then
+        echo "$INSTALLED_CONFIG/$1"
+    fi
+}
+
+DEFAULT_RDM=$(find_default "rdm.toml")
+if [ -n "$DEFAULT_RDM" ] && [ ! -f "$RDM_CONFIG_DIR/rdm.toml" ]; then
+    cp "$DEFAULT_RDM" "$RDM_CONFIG_DIR/rdm.toml"
 fi
-if [ -f "$SCRIPT_DIR/../config/session.toml" ] && [ ! -f "$RDM_CONFIG_DIR/session.toml" ]; then
-    cp "$SCRIPT_DIR/../config/session.toml" "$RDM_CONFIG_DIR/session.toml"
+
+DEFAULT_SESSION=$(find_default "session.toml")
+if [ -n "$DEFAULT_SESSION" ] && [ ! -f "$RDM_CONFIG_DIR/session.toml" ]; then
+    cp "$DEFAULT_SESSION" "$RDM_CONFIG_DIR/session.toml"
 fi
 
 # Copy labwc config if not present
 LABWC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/labwc"
 mkdir -p "$LABWC_DIR"
-if [ -f "$SCRIPT_DIR/../config/labwc-rc.xml" ] && [ ! -f "$LABWC_DIR/rc.xml" ]; then
-    cp "$SCRIPT_DIR/../config/labwc-rc.xml" "$LABWC_DIR/rc.xml"
+DEFAULT_LABWC=$(find_default "labwc-rc.xml")
+if [ -n "$DEFAULT_LABWC" ] && [ ! -f "$LABWC_DIR/rc.xml" ]; then
+    cp "$DEFAULT_LABWC" "$LABWC_DIR/rc.xml"
 fi
 
 # Deploy xdg-desktop-portal config so the wlr backend activates for RDM
 PORTAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal"
 mkdir -p "$PORTAL_DIR"
-if [ -f "$SCRIPT_DIR/../config/rdm-portals.conf" ] && [ ! -f "$PORTAL_DIR/portals.conf" ]; then
-    cp "$SCRIPT_DIR/../config/rdm-portals.conf" "$PORTAL_DIR/portals.conf"
+DEFAULT_PORTAL=$(find_default "rdm-portals.conf")
+if [ -n "$DEFAULT_PORTAL" ] && [ ! -f "$PORTAL_DIR/portals.conf" ]; then
+    cp "$DEFAULT_PORTAL" "$PORTAL_DIR/portals.conf"
 fi
 
 # labwc autostart file — launches rdm-session which manages everything else

@@ -31,13 +31,17 @@ info "Checking prerequisites..."
 
 missing=()
 
-command -v cargo  >/dev/null 2>&1 || missing+=("rust/cargo")
-command -v labwc  >/dev/null 2>&1 || missing+=("labwc")
-command -v swaybg >/dev/null 2>&1 || missing+=("swaybg")
-command -v foot   >/dev/null 2>&1 || missing+=("foot")
-command -v grim   >/dev/null 2>&1 || missing+=("grim")
-command -v slurp  >/dev/null 2>&1 || missing+=("slurp")
-command -v wpctl  >/dev/null 2>&1 || missing+=("wireplumber")
+command -v cargo    >/dev/null 2>&1 || missing+=("rust/cargo")
+command -v labwc    >/dev/null 2>&1 || missing+=("labwc")
+command -v swaybg   >/dev/null 2>&1 || missing+=("swaybg")
+command -v foot     >/dev/null 2>&1 || missing+=("foot")
+command -v grim     >/dev/null 2>&1 || missing+=("grim")
+command -v slurp    >/dev/null 2>&1 || missing+=("slurp")
+command -v wpctl    >/dev/null 2>&1 || missing+=("wireplumber")
+command -v swayidle >/dev/null 2>&1 || missing+=("swayidle")
+command -v swaylock >/dev/null 2>&1 || missing+=("swaylock")
+command -v wl-copy  >/dev/null 2>&1 || missing+=("wl-clipboard")
+command -v wlr-randr >/dev/null 2>&1 || missing+=("wlr-randr")
 
 if pkg-config --exists gtk4 2>/dev/null; then
     ok "gtk4"
@@ -51,26 +55,28 @@ else
     missing+=("gtk4-layer-shell")
 fi
 
-if pkg-config --exists gtksourceview-5 2>/dev/null; then
-    ok "gtksourceview5"
-else
-    missing+=("gtksourceview5")
-fi
-
-if pkg-config --exists webkitgtk-6.0 2>/dev/null; then
-    ok "webkit2gtk-6.0"
-else
-    missing+=("webkit2gtk-6.0 (optional, for rdm-editor preview)")
-fi
+# Optional runtime deps (warn but don't block)
+opt_missing=()
+command -v polkit-gnome-authentication-agent-1 >/dev/null 2>&1 || \
+    [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ] || \
+    opt_missing+=("polkit-gnome")
+command -v sway-audio-idle-inhibit >/dev/null 2>&1 || opt_missing+=("sway-audio-idle-inhibit (optional, for audio idle inhibit)")
 
 if [ ${#missing[@]} -gt 0 ]; then
     err "Missing dependencies: ${missing[*]}"
     echo ""
     echo "  Install on Arch Linux:"
-    echo "    sudo pacman -S labwc swaybg foot rust gtk4 gtk4-layer-shell gtksourceview5 webkit2gtk-6.0 grim slurp wl-clipboard wireplumber networkmanager"
+    echo "    sudo pacman -S labwc swaybg foot rust gtk4 gtk4-layer-shell grim slurp wl-clipboard wireplumber swayidle swaylock wlr-randr polkit-gnome"
+    echo ""
+    echo "  Optional (recommended):"
+    echo "    yay -S sway-audio-idle-inhibit  # AUR — inhibit idle while audio plays"
     echo ""
     echo "  Then re-run this script."
     exit 1
+fi
+
+if [ ${#opt_missing[@]} -gt 0 ]; then
+    echo -e "  ${BLUE}ℹ${NC}  Optional packages not found: ${opt_missing[*]}"
 fi
 
 ok "All prerequisites found"
@@ -87,17 +93,17 @@ ok "Build complete"
 
 info "Installing binaries to $PREFIX/bin/ (requires sudo)..."
 
-sudo install -Dm755 target/release/rdm-panel     "$PREFIX/bin/rdm-panel"
-sudo install -Dm755 target/release/rdm-launcher   "$PREFIX/bin/rdm-launcher"
-sudo install -Dm755 target/release/rdm-session    "$PREFIX/bin/rdm-session"
-sudo install -Dm755 target/release/rdm-snap       "$PREFIX/bin/rdm-snap"
-sudo install -Dm755 target/release/rdm-watermark  "$PREFIX/bin/rdm-watermark"
-sudo install -Dm755 target/release/rdm-settings   "$PREFIX/bin/rdm-settings"
-sudo install -Dm755 target/release/rdm-notify    "$PREFIX/bin/rdm-notify"
-sudo install -Dm755 target/release/rdm-dock      "$PREFIX/bin/rdm-dock"
-#sudo install -Dm755 target/release/rdm-editor    "$PREFIX/bin/rdm-editor"#
+sudo install -Dm755 target/release/rdm-panel      "$PREFIX/bin/rdm-panel"
+sudo install -Dm755 target/release/rdm-launcher    "$PREFIX/bin/rdm-launcher"
+sudo install -Dm755 target/release/rdm-session     "$PREFIX/bin/rdm-session"
+sudo install -Dm755 target/release/rdm-snap        "$PREFIX/bin/rdm-snap"
+sudo install -Dm755 target/release/rdm-watermark   "$PREFIX/bin/rdm-watermark"
+sudo install -Dm755 target/release/rdm-settings    "$PREFIX/bin/rdm-settings"
+sudo install -Dm755 target/release/rdm-notify      "$PREFIX/bin/rdm-notify"
+sudo install -Dm755 target/release/rdm-dock        "$PREFIX/bin/rdm-dock"
+sudo install -Dm755 target/release/rdm-noterm      "$PREFIX/bin/rdm-noterm"
 
-ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-dock, rdm-editor"
+ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-dock, rdm-noterm"
 
 # ─── Install scripts ───────────────────────────────────────────
 
@@ -184,6 +190,57 @@ else
     ok "labwc rc.xml already exists (not overwriting)"
 fi
 
+# ─── Install portal config ─────────────────────────────────────
+
+PORTAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal"
+mkdir -p "$PORTAL_DIR"
+
+if [ ! -f "$PORTAL_DIR/portals.conf" ]; then
+    cp config/rdm-portals.conf "$PORTAL_DIR/portals.conf"
+    ok "Copied portals.conf → $PORTAL_DIR/"
+else
+    ok "portals.conf already exists (not overwriting)"
+fi
+
+# ─── Install default configs to share dir (for rdm-start) ─────
+
+info "Installing default configs to $PREFIX/share/rdm/..."
+
+sudo mkdir -p "$PREFIX/share/rdm"
+sudo install -Dm644 config/rdm.toml       "$PREFIX/share/rdm/rdm.toml"
+sudo install -Dm644 config/session.toml    "$PREFIX/share/rdm/session.toml"
+sudo install -Dm644 config/labwc-rc.xml    "$PREFIX/share/rdm/labwc-rc.xml"
+sudo install -Dm644 config/rdm-portals.conf "$PREFIX/share/rdm/rdm-portals.conf"
+
+ok "Default configs → $PREFIX/share/rdm/"
+
+# ─── Build & install plugins ──────────────────────────────────
+
+info "Building panel plugins (release mode)..."
+
+"$SCRIPT_DIR/build-plugins.sh" --release
+
+RDM_PLUGINS_DIR="$PREFIX/lib/rdm/plugins"
+sudo mkdir -p "$RDM_PLUGINS_DIR"
+
+PLUGIN_COUNT=0
+for so in "$SCRIPT_DIR"/plugins/lib*.so; do
+    [ -f "$so" ] || continue
+    sudo install -Dm755 "$so" "$RDM_PLUGINS_DIR/$(basename "$so")"
+    ok "$(basename "$so") → $RDM_PLUGINS_DIR/"
+    PLUGIN_COUNT=$((PLUGIN_COUNT + 1))
+done
+
+if [ $PLUGIN_COUNT -eq 0 ]; then
+    echo -e "  ${BLUE}ℹ${NC}  No plugins found to install"
+else
+    ok "$PLUGIN_COUNT plugin(s) installed to $RDM_PLUGINS_DIR/"
+fi
+
+# Also create user plugin dir for convenience
+mkdir -p "${HOME}/.local/share/rdm/plugins"
+ok "Created ~/.local/share/rdm/plugins/ (for user plugins)"
+
 # ─── Done ───────────────────────────────────────────────────────
 
 echo ""
@@ -193,6 +250,10 @@ echo "  Next steps:"
 echo "    1. Log out of your current session"
 echo "    2. Select \"RDM Desktop\" from your display manager (SDDM, GDM, etc.)"
 echo "    3. Or from a TTY:  exec rdm-start"
+echo ""
+echo "  Plugin paths:"
+echo "    System:  $RDM_PLUGINS_DIR/"
+echo "    User:    ~/.local/share/rdm/plugins/"
 echo ""
 echo "  After making code changes:"
 echo "    cargo build --release && sudo install -m755 target/release/<crate> $PREFIX/bin/"

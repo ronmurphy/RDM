@@ -42,12 +42,14 @@ BINARIES=(
     rdm-watermark
     rdm-settings
     rdm-notify
+    rdm-dock
+    rdm-noterm
     rdm-start
     rdm-reload
     rdm-screenshot
     rdm-volume
     rdm-idle-inhibit
-    rdm-dock
+    rdm-plugin-install
 )
 
 for bin in "${BINARIES[@]}"; do
@@ -74,6 +76,61 @@ DBUS_SERVICE="${XDG_DATA_HOME:-$HOME/.local/share}/dbus-1/services/org.freedeskt
 if [ -f "$DBUS_SERVICE" ]; then
     rm -f "$DBUS_SERVICE"
     ok "Removed $DBUS_SERVICE"
+fi
+
+# ─── Remove .desktop entries ──────────────────────────────────
+
+info "Removing .desktop entries..."
+
+DESKTOP_FILES=(
+    /usr/share/applications/rdm-editor.desktop
+    /usr/share/applications/rdm-settings.desktop
+    /usr/share/applications/rdm-noterm.desktop
+    /usr/share/applications/rdm-launcher.desktop
+)
+
+for df in "${DESKTOP_FILES[@]}"; do
+    if [ -f "$df" ]; then
+        sudo rm -f "$df"
+        ok "Removed $df"
+    fi
+done
+
+# ─── Remove icons ──────────────────────────────────────────────
+
+info "Removing icons..."
+
+for icon in rdm-settings.svg rdm-noterm.svg rdm-launcher.svg; do
+    ICON_PATH="/usr/share/icons/hicolor/scalable/apps/$icon"
+    if [ -f "$ICON_PATH" ]; then
+        sudo rm -f "$ICON_PATH"
+        ok "Removed $icon"
+    fi
+done
+
+sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+
+# ─── Remove system plugins ────────────────────────────────────
+
+info "Removing system plugins..."
+
+RDM_PLUGINS_DIR="$PREFIX/lib/rdm/plugins"
+if [ -d "$RDM_PLUGINS_DIR" ]; then
+    sudo rm -rf "$RDM_PLUGINS_DIR"
+    ok "Removed $RDM_PLUGINS_DIR/"
+fi
+
+# Remove parent dirs if empty
+sudo rmdir "$PREFIX/lib/rdm" 2>/dev/null || true
+
+# ─── Remove shared config defaults ────────────────────────────
+
+info "Removing shared config defaults..."
+
+RDM_SHARE_DIR="$PREFIX/share/rdm"
+if [ -d "$RDM_SHARE_DIR" ]; then
+    sudo rm -rf "$RDM_SHARE_DIR"
+    ok "Removed $RDM_SHARE_DIR/"
 fi
 
 # ─── Done ───────────────────────────────────────────────────────

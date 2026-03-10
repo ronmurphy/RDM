@@ -496,11 +496,148 @@ RDM connects to this protocol in a **separate thread** from GTK, using its own `
 - [ ] Brightness slider in tray
 - [ ] Visual snap zone preview overlays
 - [ ] Workspace indicator widget in panel
-- [ ] Multi-monitor support in settings
-- [x] Configurable theme / user CSS override (3-layer theme system + theme editor)
 - [ ] Taskbar pinned apps
 - [ ] Screen recording integration
 - [ ] Auto-detect battery path (iterate `/sys/class/power_supply/`)
 - [ ] Proper freedesktop session management (logout inhibit, etc.)
 - [ ] Notification actions (button callbacks)
 - [ ] Notification history / notification center
+- [x] Configurable theme / user CSS override (3-layer theme system + theme editor)
+- [x] Multi-monitor display arrangement in settings
+- [x] Panel plugin system (cdylib `.so` plugins with C ABI)
+- [x] Clipboard manager panel plugin (text + images)
+- [x] System monitor panel plugin (CPU / RAM / temp)
+- [x] Plugin management UI in settings (enable/disable/reorder)
+- [x] Idle management (swayidle + DPMS + audio inhibit)
+- [x] Screen lock (swaylock, auto-lock, lock-before-sleep)
+- [x] XDG desktop portal integration (screen sharing)
+- [x] Polkit authentication agent
+- [x] Dock / app dock (rdm-dock)
+- [x] Multi-distro install script (Arch, Fedora, Debian)
+
+---
+
+## Completion Status
+
+RDM is a fully functional Wayland desktop environment as of March 2026. The following core DE features are implemented and working:
+
+| Feature | Status | Component |
+|---------|--------|-----------|
+| Compositor integration | ✅ | labwc + rdm-start |
+| Panel / Taskbar | ✅ | rdm-panel (3 modes: icons, nerd, text) |
+| App Launcher | ✅ | rdm-launcher |
+| Notifications | ✅ | rdm-notify (freedesktop D-Bus) |
+| Wallpaper | ✅ | swaybg managed by rdm-session |
+| Window Snapping | ✅ | labwc native (half, maximize, corners) |
+| Workspaces | ✅ | labwc native (4 workspaces, Super+1-4) |
+| Settings GUI | ✅ | rdm-settings (7 pages) |
+| Theming | ✅ | 9 built-in themes + visual theme editor |
+| Screenshots | ✅ | rdm-screenshot (region, full, output) |
+| Volume/Media Keys | ✅ | rdm-volume + labwc keybinds |
+| Session Manager | ✅ | rdm-session (autostart, crash recovery, hot reload) |
+| Screen Lock | ✅ | swaylock (Super+L, auto-lock, lock-before-sleep) |
+| Idle Management | ✅ | swayidle + rdm-idle-inhibit (audio-aware) |
+| Clipboard Manager | ✅ | rdm-panel-clipboard plugin |
+| System Monitor | ✅ | rdm-panel-sysmon plugin |
+| Plugin System | ✅ | cdylib .so plugins with settings UI |
+| Display Arrangement | ✅ | Interactive drag canvas in rdm-settings |
+| XDG Portal | ✅ | Screen sharing (OBS, Discord) |
+| Polkit Agent | ✅ | polkit-gnome autostart |
+| Dock | ✅ | rdm-dock (optional) |
+| File Manager | ✅ | rdm-noterm (terminal + clickable file browser) |
+| Hot Reload | ✅ | rdm-reload (SIGUSR1, no logout needed) |
+| D-Bus Activation | ✅ | rdm-notify auto-starts on demand |
+| Install / Uninstall | ✅ | One-script install with prereq checks |
+
+---
+
+## Panel Plugin System
+
+**Added:** March 2026
+
+### Architecture
+
+Panel plugins are **cdylib** shared libraries (`.so` files) loaded at runtime by `rdm-panel` via `libloading`. Each plugin must export 4 C ABI symbols:
+
+```rust
+#[no_mangle] pub extern "C" fn rdm_plugin_info() -> rdm_panel_api::PluginInfo;
+#[no_mangle] pub extern "C" fn rdm_plugin_new_instance(id: u32, config_toml: *const c_char) -> *mut gtk4::Box;
+#[no_mangle] pub extern "C" fn rdm_plugin_remove_instances();
+#[no_mangle] pub extern "C" fn rdm_plugin_exit();
+```
+
+### Plugin Search Paths (in priority order)
+
+1. `~/.local/share/rdm/plugins/` — user plugins
+2. `/usr/local/lib/rdm/plugins/` — system plugins (from install.sh)
+3. `/usr/lib/rdm/plugins/` — distro packages
+4. `<exe_dir>/rdm-plugins/` — dev convenience
+
+### Plugin Configuration
+
+Plugins are listed in `rdm.toml` under `[[panel.plugins]]` entries:
+
+```toml
+[[panel.plugins]]
+name     = "clipboard"
+position = "right"
+
+[[panel.plugins]]
+name     = "sysmon"
+position = "right"
+```
+
+Disabled plugins are commented out with `#` prefix (preserving config for re-enable).
+
+### Settings UI
+
+The **Plugins** page in rdm-settings provides:
+- Discovery of all `.so` files across search paths
+- Checkbox to enable/disable each plugin
+- Dropdown for panel position (left / center / right)
+- Up/Down buttons for load order
+- Save & Reload button to apply changes
+
+### Built-in Plugins
+
+| Plugin | Crate | Description |
+|--------|-------|-------------|
+| clipboard | rdm-panel-clipboard | Clipboard history (text + images), polls `wl-paste`, paste-back via `wl-copy` |
+| sysmon | rdm-panel-sysmon | CPU%, RAM%, temperature from `/sys/class/thermal/` |
+| hello | rdm-panel-hello | Example/template plugin for developers |
+
+---
+
+## Idle & Lock System
+
+**Added:** March 2026
+
+### Components
+
+- **swayidle** — Managed by rdm-session with dynamically built args from `rdm.toml [idle]`
+- **swaylock** — Screen locker, triggered by timeout, keybind (Super+L), or before-sleep
+- **rdm-idle-inhibit** — Script that detects audio playback and inhibits idle
+
+### Configuration (`rdm.toml`)
+
+```toml
+[idle]
+enabled = true
+screen_off_secs = 300         # DPMS off after 5 min
+lock_timeout_secs = 600       # Lock after 10 min (0 = no auto-lock)
+lock_before_sleep = true      # Lock on suspend
+idle_inhibit_on_audio = true  # Don't blank while audio plays
+```
+
+### rdm-idle-inhibit
+
+Prefers `sway-audio-idle-inhibit` (exec's into it if available). Falls back to a polling loop that checks `pactl list sinks` for `RUNNING` state and resets the idle timer via `wlrctl` or `ydotool`.
+
+---
+
+## rdm-dock — Application Dock
+
+**Path:** `crates/rdm-dock/`
+**Binary:** `rdm-dock`
+
+A layer-shell dock bar that shows running applications as icon buttons. Uses the same `wlr-foreign-toplevel-management` protocol as the panel taskbar. Can be enabled/disabled from the Settings app (Panel page dock toggle). Auto-starts via `session.toml` when enabled.

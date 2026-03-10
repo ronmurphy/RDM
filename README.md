@@ -2,7 +2,7 @@
 
 # RDM — Rust Desktop Manager
 
-A lightweight, modular Wayland desktop environment built from scratch in Rust. RDM sits on top of [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides a full desktop shell: panel/taskbar, app launcher, system tray, settings app, wallpaper management, notifications, session management, and NoTerm (a beginner-friendly terminal/files view) — with **9 built-in color themes** and a visual theme editor for creating your own.
+A lightweight, modular Wayland desktop environment built from scratch in **Rust + GTK4**. RDM runs on [labwc](https://labwc.github.io/) (a wlroots-based compositor) and provides everything you need for a daily-driver desktop: panel, app launcher, notifications, clipboard manager, screen lock, idle management, settings GUI, theming, and a plugin system — all in ~15k lines of Rust.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Rust](https://img.shields.io/badge/rust-2021_edition-orange)
@@ -13,150 +13,100 @@ A lightweight, modular Wayland desktop environment built from scratch in Rust. R
 
 ## Screenshots
 
-> *Coming soon — RDM is under active development.*
+> *Coming soon*
 
 ---
 
-## What It Does
+## Features
 
-- **Panel/Taskbar** — Top (or bottom) bar with app launcher button, running-window taskbar, clock with calendar popup, and system tray. Three taskbar modes:
-  - **Icons** — GTK icon theme icons for each open window
-  - **Nerd** — Nerd Font glyphs with icon-derived colors extracted from each app's icon
-  - **Text** — Window title buttons (classic style)
-- **App Launcher** — Overlay search dialog (Super key) that scans `.desktop` files and launches apps. Includes a dedicated Settings button for quick access to RDM Settings
-- **System Tray** — Unified menu button combining:
-  - Battery indicator with charge level, Nerd Font icons, and color coding
-  - WiFi submenu — scans networks via NetworkManager, connect to known/new networks with password dialog
-  - Session controls — Lock, Logout, Reboot, Shutdown
-- **Wallpaper** — Managed via `swaybg`, configurable through the settings app (image path, fill mode, solid color fallback)
-- **Settings App** — GTK4 GUI to configure panel options (taskbar mode, position, height, clock), wallpaper (image, mode, background color), display arrangement, and a **Theme Editor** for creating custom color themes. Changes apply via hot reload.
-- **NoTerm (`rdm-noterm`)** — Guided terminal + file browser hybrid with:
-  - command input at the bottom (Enter runs + clears)
-  - enhanced clickable `ls` tiles with `..` as first item and single-click folder navigation
-  - raw/text/icons/nerd display modes
-  - built-in preview for common text/image files
-  - preview drawer hidden by default, slide-out on selection, with close `X`
-  - remembered display mode across launches (`~/.config/rdm/noterm-mode`)
-- **Hot Reload** — Rebuild any component, run `rdm-reload`, and see changes instantly without restarting the compositor or losing your windows
-- **Session Manager** — Manages autostart processes, automatic crash recovery, PID tracking, SIGUSR1-driven hot reload
-- **Version Watermark** — Subtle build version label on the desktop (layer-shell bottom)
-- **Window Snapping** — Provided by labwc's built-in snapping (half-screen, maximize, corners) with keyboard shortcuts
-- **Notifications** — Built-in notification daemon (`rdm-notify`) implementing the freedesktop D-Bus notification spec
-- **Screenshots** — Multi-monitor screenshot tool (`rdm-screenshot`) using grim + slurp, saves to `~/Pictures/Screenshots/` and copies to clipboard
-- **Volume & Media Keys** — Multimedia key support for volume control (via WirePlumber) and media playback (via playerctl)
-
-## What It Can't Do (Yet)
-
-- Brightness slider in the tray
-- Visual snap zone previews (quarter/thirds tiling overlays)
-- Multi-monitor configuration UI
-- Workspace indicator / switcher widget in the panel
-- Application pinning in the taskbar
-- Drag-and-drop window reordering
-- Screen recording
-
----
-
-## Architecture
-
-RDM is a Cargo workspace with 9 crates:
-
-| Crate | Binary | Purpose |
-|-------|--------|---------|
-| `rdm-session` | `rdm-session` | Process manager — starts/stops/restarts all shell components, handles hot reload via SIGUSR1 |
-| `rdm-panel` | `rdm-panel` | Panel bar — taskbar, clock, system tray (battery, wifi, power), launcher button |
-| `rdm-launcher` | `rdm-launcher` | Overlay app launcher — searches `.desktop` files, keyboard-driven |
-| `rdm-notify` | `rdm-notify` | Notification daemon — freedesktop D-Bus notifications with GTK4 layer-shell popups |
-| `rdm-settings` | `rdm-settings` | GTK4 settings GUI — panel, wallpaper, displays, and theme editor |
-| `rdm-noterm` | `rdm-noterm` | Guided terminal/files app with enhanced `ls`, click navigation, and inline previews |
-| `rdm-watermark` | `rdm-watermark` | Version watermark on desktop background |
-| `rdm-snap` | `rdm-snap` | Snap daemon (stub — labwc handles snapping natively for now) |
-| `rdm-common` | *(library)* | Shared config types, load/save, build info, 3-layer CSS theme system |
-
-### Runtime Dependencies (not Rust crates)
-
-| Program | Role |
-|---------|------|
-| [labwc](https://labwc.github.io/) | Wayland compositor (wlroots-based) |
-| [swaybg](https://github.com/swaywm/swaybg) | Wallpaper renderer |
-| [foot](https://codeberg.org/dnkl/foot) | Default terminal emulator |
-| [grim](https://sr.ht/~emersion/grim/) | Screenshot capture (Wayland) |
-| [slurp](https://github.com/emersion/slurp) | Region selection for screenshots |
-| [wl-clipboard](https://github.com/bugaevc/wl-clipboard) | Clipboard support (screenshot copy) |
-| [WirePlumber](https://pipewire.pages.freedesktop.org/wireplumber/) | Volume control via `wpctl` |
-| [playerctl](https://github.com/altdesktop/playerctl) | Media playback control |
-| NetworkManager | WiFi management (via `nmcli`) |
-
-### How It Starts
-
-```
-Display Manager (SDDM, etc.)
-  └── rdm-start          (sets XDG vars, writes labwc autostart, exec labwc)
-        └── labwc         (Wayland compositor)
-              └── rdm-session   (reads session.toml, spawns all children)
-                    ├── rdm-panel       (panel + taskbar + tray)
-                    ├── rdm-notify      (notification daemon)
-                    ├── rdm-watermark   (version label)
-                    └── swaybg          (wallpaper, args from rdm.toml)
-```
-
-### Config Files
-
-All config lives in `~/.config/rdm/`:
-
-| File | Purpose |
-|------|---------|
-| `rdm.toml` | Panel settings, launcher size, snap config, wallpaper config |
-| `session.toml` | Autostart process list for rdm-session |
-
-labwc config lives in `~/.config/labwc/rc.xml` (keybindings, snapping, theme).
+| Category | What You Get |
+|----------|-------------|
+| **Panel / Taskbar** | Top or bottom bar with app launcher button, running-window taskbar (icons, nerd-font, or text mode), clock + calendar popup, and system tray (battery, WiFi, session controls) |
+| **App Launcher** | Full-screen overlay search (Super key), scans `.desktop` files, keyboard-driven |
+| **Notifications** | Built-in freedesktop D-Bus notification daemon with themed popups |
+| **Clipboard Manager** | Panel plugin — stores text + image history, one-click paste-back |
+| **System Monitor** | Panel plugin — live CPU / RAM / temperature readout |
+| **Screen Lock** | Super+L locks via swaylock; auto-lock after timeout; lock-before-sleep |
+| **Idle Management** | Screen blanking + DPMS via swayidle; audio/video playback inhibits idle |
+| **Screenshots** | Region, full-screen, or current-monitor capture (grim + slurp), auto-copied to clipboard |
+| **Settings App** | GTK4 GUI — Appearance, Panel, Wallpaper, Displays (drag arrangement), Plugins, Theme Editor, Diagnostics |
+| **9 Built-in Themes** | Tokyo Night, Catppuccin Mocha, Nord, Dracula, Gruvbox, Ubuntu, macOS, Solarized Dark, Windows 11 |
+| **Theme Editor** | Visual color picker to create and save custom themes |
+| **Plugin System** | Panel plugins as `.so` shared libraries — enable/disable/reorder in Settings |
+| **Dock** | Optional app dock (auto-hide, configurable) |
+| **NoTerm** | Beginner-friendly terminal + file browser hybrid with clickable tiles and inline previews |
+| **Hot Reload** | Rebuild a component, run `rdm-reload`, changes apply instantly — no logout needed |
+| **Session Manager** | Autostart management, crash recovery, PID tracking |
+| **XDG Portal** | Screen sharing / capture works out of the box (OBS, Discord, etc.) |
+| **Polkit Agent** | Authentication dialogs for privileged operations |
+| **Volume / Media Keys** | Volume control (WirePlumber) and media playback (playerctl) |
 
 ---
 
 ## Installation
 
-### Prerequisites (Arch Linux)
+### 1. Install Dependencies
+
+<details>
+<summary><b>Arch Linux</b></summary>
 
 ```bash
-# Compositor and Wayland tools
-sudo pacman -S labwc swaybg foot
+sudo pacman -S labwc swaybg swayidle swaylock foot grim slurp wl-clipboard \
+  wlr-randr wireplumber playerctl networkmanager polkit-gnome \
+  rust gtk4 gtk4-layer-shell
 
-# Screenshot & media tools
-sudo pacman -S grim slurp wl-clipboard wireplumber playerctl
-
-# Build dependencies
-sudo pacman -S rust cargo gtk4 gtk4-layer-shell gtksourceview5 webkit2gtk-6.0
-
-# Runtime dependencies
-sudo pacman -S networkmanager
-
-# Recommended: a Nerd Font for the "nerd" taskbar mode
-# Install from AUR or https://www.nerdfonts.com/
-# e.g., JetBrainsMono Nerd Font, IosevkaTerm Nerd Font Mono
+# Recommended (AUR):
+yay -S sway-audio-idle-inhibit   # inhibit idle while audio plays
 ```
 
-### Clone and Install
+</details>
+
+<details>
+<summary><b>Fedora 40+</b></summary>
+
+```bash
+sudo dnf install labwc swaybg swayidle swaylock foot grim slurp wl-clipboard \
+  wlr-randr wireplumber playerctl NetworkManager polkit-gnome \
+  rust cargo gtk4-devel gtk4-layer-shell-devel
+```
+
+</details>
+
+<details>
+<summary><b>Debian 13 (Trixie) / Ubuntu 24.04+</b></summary>
+
+```bash
+sudo apt install labwc swaybg swayidle swaylock foot grim slurp wl-clipboard \
+  wlr-randr wireplumber playerctl network-manager policykit-1-gnome \
+  rustc cargo libgtk-4-dev libgtk4-layer-shell-dev
+```
+
+</details>
+
+> **Optional but recommended:** Install a [Nerd Font](https://www.nerdfonts.com/) (e.g. JetBrainsMono Nerd Font) for the nerd taskbar mode.
+
+### 2. Clone & Install
 
 ```bash
 git clone https://github.com/ronmurphy/RDM.git
 cd RDM
-chmod +x install.sh
 ./install.sh
 ```
 
-The install script will:
-1. Build all crates in release mode
-2. Install binaries to `/usr/local/bin/`
-3. Install the `rdm-start`, `rdm-reload`, and `rdm-screenshot` scripts
-4. Register RDM as a session in your display manager (`/usr/share/wayland-sessions/rdm.desktop`)
-5. Install D-Bus activation service for `rdm-notify`
-6. Copy default configs to `~/.config/rdm/` (won't overwrite existing)
-7. Copy labwc config to `~/.config/labwc/rc.xml` (won't overwrite existing)
+The install script:
+- Builds all binaries and plugins in release mode
+- Installs binaries to `/usr/local/bin/`
+- Installs panel plugins to `/usr/local/lib/rdm/plugins/`
+- Registers RDM as a Wayland session for your display manager
+- Installs D-Bus service, icons, `.desktop` entries
+- Copies default configs to `~/.config/rdm/` (won't overwrite existing)
+- Sets up labwc keybindings and xdg-desktop-portal config
 
-Then **log out** and select **"RDM Desktop"** from your display manager's session chooser.
+### 3. Log In
 
-### Starting from a TTY
+Log out, then select **"RDM Desktop"** from your display manager (SDDM, GDM, etc.).
 
+Or from a TTY:
 ```bash
 exec rdm-start
 ```
@@ -164,52 +114,107 @@ exec rdm-start
 ### Uninstall
 
 ```bash
-chmod +x uninstall.sh
 ./uninstall.sh
 ```
 
 ---
 
-## Usage
-
-### Keyboard Shortcuts
+## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `Super` (tap) | Open app launcher |
-| `Super + Enter` | Open terminal (foot) |
-| `Super + S` | Screenshot (region select) |
-| `Super + Shift + S` | Screenshot (all monitors) |
-| `Print Screen` | Screenshot (all monitors) |
-| `Super + Left/Right/Up/Down` | Snap window to half-screen |
-| `Super + F` | Toggle maximize |
+| `Super` (tap) | App launcher |
+| `Super + Enter` | Terminal (foot) |
+| `Super + L` | Lock screen |
 | `Super + Q` | Close window |
-| `Super + 1-4` | Switch to workspace 1-4 |
-| `Super + Shift + 1-4` | Move window to workspace 1-4 |
-| `Volume Up/Down/Mute` | Adjust volume (multimedia keys) |
-| `Play/Next/Prev` | Media playback control |
+| `Super + F` | Toggle maximize |
+| `Super + Arrow` | Snap window (half-screen) |
+| `Super + S` | Screenshot (region) |
+| `Super + Shift + S` | Screenshot (all monitors) |
+| `Super + Alt + S` | Screenshot (current monitor) |
+| `Print` | Screenshot (all monitors) |
+| `Super + 1–4` | Switch workspace |
+| `Super + Shift + 1–4` | Move window to workspace |
+| `Volume / Mute keys` | Volume control |
 
-### Development Workflow
+---
 
-RDM supports hot reload for rapid development:
+## Architecture
 
-```bash
-# Edit any crate's source code, then:
-cargo build --release
-sudo install -m755 target/release/rdm-panel /usr/local/bin/
-rdm-reload
-# Panel restarts with new binary — no logout needed
+```
+Display Manager
+  └── rdm-start           # sets env vars, deploys configs, exec labwc
+        └── labwc          # Wayland compositor
+              └── rdm-session    # reads session.toml, spawns & monitors:
+                    ├── rdm-panel        # panel + taskbar + tray + plugins
+                    ├── rdm-notify       # notification daemon
+                    ├── rdm-watermark    # version label on desktop
+                    ├── swaybg           # wallpaper
+                    ├── swayidle         # screen blank + auto-lock
+                    ├── rdm-idle-inhibit # audio playback detection
+                    └── polkit-gnome     # auth agent
 ```
 
-### Settings
+### Components
 
-Run `rdm-settings` from the launcher or terminal to open the settings GUI. Changes are saved to `~/.config/rdm/rdm.toml` and applied via hot reload.
+| Crate | Type | Purpose |
+|-------|------|---------|
+| `rdm-session` | binary | Session/process manager with crash recovery and hot reload |
+| `rdm-panel` | binary | Panel bar — taskbar, clock, tray, plugin host |
+| `rdm-launcher` | binary | Overlay app launcher |
+| `rdm-notify` | binary | Freedesktop D-Bus notification daemon |
+| `rdm-settings` | binary | GTK4 settings GUI (7 pages) |
+| `rdm-dock` | binary | Optional app dock |
+| `rdm-noterm` | binary | Terminal + file browser hybrid |
+| `rdm-snap` | binary | Window snap daemon (stub — labwc handles snapping) |
+| `rdm-watermark` | binary | Desktop version watermark |
+| `rdm-common` | library | Shared config, themes, CSS system |
+| `rdm-panel-api` | library | Plugin ABI for panel plugins |
+| `rdm-panel-clipboard` | plugin | Clipboard history manager |
+| `rdm-panel-sysmon` | plugin | CPU / RAM / temp monitor |
+| `rdm-panel-hello` | plugin | Example/template plugin |
+
+### Config Files
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `rdm.toml` | `~/.config/rdm/` | Panel, launcher, wallpaper, idle, plugin settings |
+| `session.toml` | `~/.config/rdm/` | Autostart process list |
+| `rc.xml` | `~/.config/labwc/` | Keybindings and compositor config |
+
+### Plugin System
+
+Panel plugins are shared libraries (`.so`) with a C ABI. Drop a `.so` into `~/.local/share/rdm/plugins/` or `/usr/local/lib/rdm/plugins/`, then enable it in **Settings → Plugins**. See [plugins/plugin-dev.txt](plugins/plugin-dev.txt) for the developer guide.
+
+---
+
+## Development
+
+```bash
+# Build everything
+cargo build --release
+
+# Build just plugins
+./build-plugins.sh --release
+
+# Hot reload after changes (no logout needed)
+cargo build --release -p rdm-panel
+sudo install -m755 target/release/rdm-panel /usr/local/bin/
+rdm-reload
+```
 
 ---
 
 ## Project Status
 
-See [progress.md](progress.md) for detailed technical documentation of what has been built and how each component works.
+RDM is a fully functional Wayland desktop environment. See [progress.md](progress.md) for detailed technical documentation and architecture notes.
+
+### Still on the roadmap
+- Brightness slider in tray
+- Workspace indicator / switcher widget
+- Application pinning in taskbar
+- Visual snap zone overlays
+- Screen recording
 
 ---
 
