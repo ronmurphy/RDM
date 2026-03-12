@@ -1,0 +1,14 @@
+[package]
+name    = "rdm-panel-swaylock"
+version.workspace = true
+edition.workspace = true
+
+# Must be cdylib so rdm-panel can load it with libloading at runtime.
+[lib]
+name       = "rdm_panel_swaylock"
+crate-type = ["cdylib"]
+
+[dependencies]
+rdm-panel-api = { workspace = true }
+gtk4          = { workspace = true }
+toml          = { workspace = true }

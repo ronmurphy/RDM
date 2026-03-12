@@ -4,6 +4,7 @@ members = [
     "crates/rdm-panel-api",
     "crates/rdm-panel-sysmon",
     "crates/rdm-panel-hello",
+    "crates/rdm-panel-swaylock",
     "crates/rdm-panel-clipboard",
     "crates/rdm-launcher",
     "crates/rdm-snap",
