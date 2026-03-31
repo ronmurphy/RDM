@@ -23,10 +23,20 @@ log() {
     logger -t rdm-idle-inhibit "$*"
 }
 
-# ── Method 1: sway-audio-idle-inhibit (best) ──────────────────────────
+# ── Method 1: sway-audio-idle-inhibit ─────────────────────────────────
+# Note: sway-audio-idle-inhibit creates a Wayland idle-inhibitor surface,
+# which relies on the compositor bridging zwp_idle_inhibit → ext-idle-notify.
+# Under labwc this bridging can be unreliable, so we only use it when the
+# compositor is sway (which handles the bridge natively).  For all other
+# compositors we fall through to the polling method below, which directly
+# resets the idle timer and is more reliable.
 if command -v sway-audio-idle-inhibit &>/dev/null; then
-    log "Using sway-audio-idle-inhibit"
-    exec sway-audio-idle-inhibit
+    if [ -n "${SWAYSOCK:-}" ]; then
+        log "Sway detected — using sway-audio-idle-inhibit"
+        exec sway-audio-idle-inhibit
+    else
+        log "Non-sway compositor — skipping sway-audio-idle-inhibit, using polling fallback"
+    fi
 fi
 
 # ── Need pactl for fallback methods ───────────────────────────────────

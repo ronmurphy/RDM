@@ -1214,6 +1214,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdm-panel-swaylock"
+version = "0.1.0"
+dependencies = [
+ "gtk4",
+ "rdm-panel-api",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "rdm-panel-sysmon"
 version = "0.1.0"
 dependencies = [
