@@ -50,6 +50,21 @@ pub struct PanelLayout {
     /// taskbar role.
     #[serde(default)]
     pub taskbar_hidden: bool,
+    /// Render order of built-in widgets within their zones.
+    /// The panel appends widgets in this sequence, so earlier entries appear
+    /// closer to the zone edge. Defaults to the legacy hard-coded order.
+    #[serde(default = "default_panel_order")]
+    pub order: Vec<String>,
+}
+
+fn default_panel_order() -> Vec<String> {
+    vec![
+        "launcher".to_string(),
+        "taskbar".to_string(),
+        "clock".to_string(),
+        "sys_popup".to_string(),
+        "tray".to_string(),
+    ]
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -101,6 +116,7 @@ impl Default for PanelLayout {
             sys_popup: default_right(),
             tray: default_right(),
             taskbar_hidden: false,
+            order: default_panel_order(),
         }
     }
 }
@@ -271,6 +287,16 @@ pub fn load_theme_layout_for(theme_name: &str) -> ThemeLayout {
         .and_then(|s| toml::from_str::<ThemeLayout>(&s).ok())
         .unwrap_or_default();
     migrate_theme_layout(layout, theme_name)
+}
+
+/// Save only the layout.toml for a theme, without touching colors or meta.
+/// Creates the theme directory in the user config dir if it doesn't exist.
+pub fn save_layout_for_theme(theme_name: &str, layout: &ThemeLayout) -> std::io::Result<()> {
+    let theme_dir = config::config_dir().join("themes").join(theme_name);
+    std::fs::create_dir_all(&theme_dir)?;
+    let content = toml::to_string_pretty(layout)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    std::fs::write(theme_dir.join("layout.toml"), content)
 }
 
 // ─── Internal ────────────────────────────────────────────────────

@@ -198,8 +198,10 @@ fn build_menu_content_classic(
     settings_btn.set_tooltip_text(Some("RDM Settings"));
     settings_btn.add_css_class("menu-settings-btn");
     settings_btn.set_valign(gtk4::Align::Center);
-    settings_btn.connect_clicked(|_| {
+    let app_for_settings = app.clone();
+    settings_btn.connect_clicked(move |_| {
         let _ = std::process::Command::new("rdm-settings").spawn();
+        app_for_settings.quit();
     });
     let search_entry = gtk4::Entry::new();
     search_entry.set_placeholder_text(Some("Search applications..."));
@@ -478,8 +480,10 @@ fn build_menu_content_win11(
     settings_btn.set_tooltip_text(Some("RDM Settings"));
     settings_btn.add_css_class("menu-settings-btn");
     settings_btn.set_valign(gtk4::Align::Center);
-    settings_btn.connect_clicked(|_| {
+    let app_for_settings = app.clone();
+    settings_btn.connect_clicked(move |_| {
         let _ = std::process::Command::new("rdm-settings").spawn();
+        app_for_settings.quit();
     });
 
     let search_entry = gtk4::Entry::new();
@@ -593,8 +597,10 @@ fn build_menu_content_spotlight(
     settings_btn.set_tooltip_text(Some("RDM Settings"));
     settings_btn.add_css_class("menu-settings-btn");
     settings_btn.set_valign(gtk4::Align::Center);
-    settings_btn.connect_clicked(|_| {
+    let app_for_settings = app.clone();
+    settings_btn.connect_clicked(move |_| {
         let _ = std::process::Command::new("rdm-settings").spawn();
+        app_for_settings.quit();
     });
     top_bar.append(&settings_btn);
     top_bar.set_margin_bottom(10);
@@ -694,8 +700,10 @@ fn build_menu_content_whisker(
     settings_btn.set_tooltip_text(Some("RDM Settings"));
     settings_btn.add_css_class("menu-settings-btn");
     settings_btn.set_valign(gtk4::Align::Center);
-    settings_btn.connect_clicked(|_| {
+    let app_for_settings = app.clone();
+    settings_btn.connect_clicked(move |_| {
         let _ = std::process::Command::new("rdm-settings").spawn();
+        app_for_settings.quit();
     });
     top_bar.append(&settings_btn);
     root.append(&top_bar);
@@ -906,8 +914,10 @@ fn build_menu_content_retro98(
     settings_btn.set_icon_name("preferences-system-symbolic");
     settings_btn.set_tooltip_text(Some("RDM Settings"));
     settings_btn.add_css_class("menu-settings-btn");
-    settings_btn.connect_clicked(|_| {
+    let app_for_settings = app.clone();
+    settings_btn.connect_clicked(move |_| {
         let _ = std::process::Command::new("rdm-settings").spawn();
+        app_for_settings.quit();
     });
     top_bar.append(&settings_btn);
 

@@ -300,48 +300,24 @@ fn build_panel_window(
     tray_area.append(&sni_tray);
     tray_area.append(&tray);
 
-    append_panel_widget(
-        &layout,
-        "launcher",
-        &launcher_btn,
-        &left_zone,
-        &center_zone,
-        &right_zone,
-    );
-    append_panel_widget(
-        &layout,
-        "taskbar",
-        &taskbar_box,
-        &left_zone,
-        &center_zone,
-        &right_zone,
-    );
-    if let Some(clock_widget) = clock_widget.as_ref() {
-        append_panel_widget(
-            &layout,
-            "clock",
-            clock_widget,
-            &left_zone,
-            &center_zone,
-            &right_zone,
-        );
+    // Build a lookup from role name → widget, then append in the order
+    // specified by layout.panel.order so users can reorder via rdm-settings.
+    let launcher_w: gtk4::Widget = launcher_btn.upcast_ref::<gtk4::Widget>().clone();
+    let taskbar_w: gtk4::Widget = taskbar_box.upcast_ref::<gtk4::Widget>().clone();
+    let tray_w: gtk4::Widget = tray_area.upcast_ref::<gtk4::Widget>().clone();
+
+    for role in &layout.panel.order {
+        let widget_opt: Option<gtk4::Widget> = match role.as_str() {
+            "launcher" => Some(launcher_w.clone()),
+            "taskbar"  => Some(taskbar_w.clone()),
+            "clock"    => clock_widget.as_ref().map(|w| w.upcast_ref::<gtk4::Widget>().clone()),
+            "tray"     => Some(tray_w.clone()),
+            _ => None,
+        };
+        if let Some(w) = widget_opt {
+            append_panel_widget(&layout, role, &w, &left_zone, &center_zone, &right_zone);
+        }
     }
-    // append_panel_widget(
-    //     &layout,
-    //     "sys_popup",
-    //     &task_popup_widget,
-    //     &left_zone,
-    //     &center_zone,
-    //     &right_zone,
-    // );
-    append_panel_widget(
-        &layout,
-        "tray",
-        &tray_area,
-        &left_zone,
-        &center_zone,
-        &right_zone,
-    );
 
     // Instantiate external plugins declared in config.
     for plugin_entry in &config.panel.plugins {

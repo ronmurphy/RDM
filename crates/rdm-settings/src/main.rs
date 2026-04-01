@@ -113,6 +113,10 @@ fn build_ui(app: &Application) {
     let panel_page = build_panel_page(&config);
     stack.add_titled(&panel_page, Some("panel"), "Panel");
 
+    // --- Panel Layout page ---
+    let (panel_layout_page, save_layout) = build_panel_layout_page(&config);
+    stack.add_titled(&panel_layout_page, Some("panel-layout"), "Layout");
+
     // --- Wallpaper page ---
     let wallpaper_page = build_wallpaper_page(&config, &window);
     stack.add_titled(&wallpaper_page, Some("wallpaper"), "Wallpaper");
@@ -178,6 +182,8 @@ fn build_ui(app: &Application) {
     let config_apply = config.clone();
     let window_apply = window.clone();
     apply_btn.connect_clicked(move |_| {
+        // Save panel layout (layout.toml) before saving rdm.toml
+        save_layout();
         let cfg = config_apply.borrow();
         match cfg.save() {
             Ok(()) => {
@@ -422,19 +428,48 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     grid.attach(&clock_switch, 1, row, 1, 1);
     row += 1;
 
-    // Clock format
+    // Clock format — preset dropdown
+    // Each entry is (display label, strftime format string)
+    const CLOCK_PRESETS: &[(&str, &str)] = &[
+        ("24h + Date  (14:30 Apr 01)",    "%H:%M %b %d"),
+        ("24h Only  (14:30)",             "%H:%M"),
+        ("24h + Seconds  (14:30:00)",     "%H:%M:%S"),
+        ("24h + Day  (Tue 14:30)",        "%a %H:%M"),
+        ("24h + Full Date  (Tue Apr 01, 14:30)", "%a %b %d, %H:%M"),
+        ("12h AM/PM + Date  (2:30 PM Apr 01)", "%I:%M %p %b %d"),
+        ("12h AM/PM Only  (2:30 PM)",     "%I:%M %p"),
+        ("12h AM/PM + Day  (Tue 2:30 PM)", "%a %I:%M %p"),
+        ("European  (01/04 14:30)",       "%d/%m %H:%M"),
+        ("US  (04/01 2:30 PM)",           "%m/%d %I:%M %p"),
+        ("ISO Date+Time  (2026-04-01 14:30)", "%Y-%m-%d %H:%M"),
+        ("Time + Week  (W14 14:30)",      "W%W %H:%M"),
+        ("Day + Month  (Tuesday, April 01)", "%A, %B %d"),
+    ];
+
     let lbl = Label::new(Some("Clock Format"));
     lbl.set_halign(gtk4::Align::Start);
     lbl.set_width_chars(16);
     grid.attach(&lbl, 0, row, 1, 1);
-    let fmt_entry = Entry::new();
-    fmt_entry.set_text(&config.borrow().panel.clock_format);
-    fmt_entry.set_hexpand(true);
+
+    let preset_labels: Vec<&str> = CLOCK_PRESETS.iter().map(|(l, _)| *l).collect();
+    let clock_fmt_list = StringList::new(&preset_labels);
+    let clock_fmt_dd = DropDown::new(Some(clock_fmt_list), gtk4::Expression::NONE);
+    clock_fmt_dd.set_hexpand(true);
+
+    let current_fmt = config.borrow().panel.clock_format.clone();
+    let selected_preset = CLOCK_PRESETS
+        .iter()
+        .position(|(_, fmt)| *fmt == current_fmt.as_str())
+        .unwrap_or(0);
+    clock_fmt_dd.set_selected(selected_preset as u32);
+
     let cfg = config.clone();
-    fmt_entry.connect_changed(move |e| {
-        cfg.borrow_mut().panel.clock_format = e.text().to_string();
+    clock_fmt_dd.connect_selected_notify(move |dd| {
+        if let Some(&(_, fmt)) = CLOCK_PRESETS.get(dd.selected() as usize) {
+            cfg.borrow_mut().panel.clock_format = fmt.to_string();
+        }
     });
-    grid.attach(&fmt_entry, 1, row, 1, 1);
+    grid.attach(&clock_fmt_dd, 1, row, 1, 1);
     row += 1;
 
     // ── Launcher section ──
@@ -2206,6 +2241,23 @@ struct PluginRow {
     position: String,
 }
 
+// ─── Panel Layout Editor Types ───────────────────────────────────
+
+#[derive(Clone, PartialEq, Debug)]
+enum LayoutItemKind {
+    Builtin,
+    Plugin,
+}
+
+#[derive(Clone, Debug)]
+struct LayoutItem {
+    /// For builtins: "launcher"/"taskbar"/"clock"/"sys_popup"/"tray". For plugins: plugin name.
+    id: String,
+    display: String,
+    kind: LayoutItemKind,
+    zone: String, // "left", "center", or "right"
+}
+
 /// Search paths for plugin .so files (mirrors rdm-panel's plugin_loader).
 fn plugin_search_paths() -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
@@ -2357,6 +2409,277 @@ fn save_plugin_entries(rows: &[PluginRow]) {
     if let Err(e) = std::fs::write(&path, new_content) {
         log::error!("Failed to write rdm.toml: {}", e);
     }
+}
+
+// ─── Panel Layout Page ───────────────────────────────────────────
+
+fn build_panel_layout_page(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()>) {
+    let page = GtkBox::new(Orientation::Vertical, 0);
+    page.set_margin_top(20);
+    page.set_margin_bottom(20);
+    page.set_margin_start(20);
+    page.set_margin_end(20);
+
+    let header = Label::new(Some("Panel Layout"));
+    header.add_css_class("settings-header");
+    header.set_halign(gtk4::Align::Start);
+    page.append(&header);
+
+    let hint = Label::new(Some(
+        "Assign panel items to Left, Center, or Right zones. Changes take effect after Save & Reload.",
+    ));
+    hint.add_css_class("settings-hint");
+    hint.set_halign(gtk4::Align::Start);
+    hint.set_wrap(true);
+    hint.set_margin_bottom(16);
+    page.append(&hint);
+
+    // Load current layout for the active theme
+    let theme_name = config.borrow().appearance.theme.clone();
+    let layout = rdm_common::theme::load_theme_layout_for(&theme_name);
+
+    // Built-in items first, then all configured plugins
+    let mut items: Vec<LayoutItem> = vec![
+        LayoutItem { id: "launcher".to_string(),  display: "Launcher".to_string(),  kind: LayoutItemKind::Builtin, zone: layout.panel.launcher.clone()  },
+        LayoutItem { id: "taskbar".to_string(),   display: "Taskbar".to_string(),   kind: LayoutItemKind::Builtin, zone: layout.panel.taskbar.clone()   },
+        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::Builtin, zone: layout.panel.clock.clone()     },
+        LayoutItem { id: "sys_popup".to_string(), display: "Sys Popup".to_string(), kind: LayoutItemKind::Builtin, zone: layout.panel.sys_popup.clone() },
+        LayoutItem { id: "tray".to_string(),      display: "Tray".to_string(),      kind: LayoutItemKind::Builtin, zone: layout.panel.tray.clone()      },
+    ];
+    for plugin in &config.borrow().panel.plugins {
+        items.push(LayoutItem {
+            id: plugin.name.clone(),
+            display: plugin.name.clone(),
+            kind: LayoutItemKind::Plugin,
+            zone: plugin.position.clone(),
+        });
+    }
+
+    let items_state = Rc::new(RefCell::new(items));
+    let zones_container = Rc::new(GtkBox::new(Orientation::Horizontal, 12));
+    zones_container.set_hexpand(true);
+    zones_container.set_margin_bottom(8);
+
+    let status_label = Rc::new(Label::new(None));
+    status_label.add_css_class("settings-hint");
+    status_label.set_halign(gtk4::Align::Start);
+    status_label.set_margin_top(8);
+
+    rebuild_layout_zones(&zones_container, &items_state, &status_label);
+    page.append(zones_container.as_ref());
+
+    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+    btn_box.set_margin_top(12);
+    btn_box.set_halign(gtk4::Align::End);
+
+    // Build a shared save closure so both the button and the main Apply can trigger it
+    let save_cb: Rc<dyn Fn()> = {
+        let is = items_state.clone();
+        let cfg = config.clone();
+        Rc::new(move || {
+            let items = is.borrow().clone();
+            let theme = cfg.borrow().appearance.theme.clone();
+            save_layout_items(&items, &theme);
+        })
+    };
+
+    let save_btn = Button::with_label("Save & Reload");
+    save_btn.add_css_class("suggested-action");
+    {
+        let cb = save_cb.clone();
+        let sl = status_label.clone();
+        save_btn.connect_clicked(move |_| {
+            cb();
+            let _ = std::process::Command::new("rdm-reload").status();
+            sl.set_text("Saved and reloading…");
+        });
+    }
+    btn_box.append(&save_btn);
+    page.append(&btn_box);
+    page.append(status_label.as_ref());
+
+    (page, save_cb)
+}
+
+fn rebuild_layout_zones(
+    container: &Rc<GtkBox>,
+    items_state: &Rc<RefCell<Vec<LayoutItem>>>,
+    status_label: &Rc<Label>,
+) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+
+    const ZONES: [&str; 3] = ["left", "center", "right"];
+    const ZONE_LABELS: [&str; 3] = ["Left", "Center", "Right"];
+
+    let items = items_state.borrow();
+
+    for (zi, &zone) in ZONES.iter().enumerate() {
+        let col = GtkBox::new(Orientation::Vertical, 6);
+        col.set_hexpand(true);
+
+        let zone_header = Label::new(Some(ZONE_LABELS[zi]));
+        zone_header.add_css_class("settings-header");
+        zone_header.set_halign(gtk4::Align::Center);
+        col.append(&zone_header);
+
+        let frame = gtk4::Frame::new(None);
+        frame.set_hexpand(true);
+        frame.set_vexpand(true);
+
+        let inner = GtkBox::new(Orientation::Vertical, 4);
+        inner.set_margin_top(8);
+        inner.set_margin_bottom(8);
+        inner.set_margin_start(8);
+        inner.set_margin_end(8);
+
+        // Collect (global_index, display_name) for items in this zone
+        let zone_items: Vec<(usize, String)> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.zone == zone)
+            .map(|(idx, item)| (idx, item.display.clone()))
+            .collect();
+
+        if zone_items.is_empty() {
+            let empty = Label::new(Some("(empty)"));
+            empty.add_css_class("settings-hint");
+            empty.set_halign(gtk4::Align::Center);
+            empty.set_margin_top(12);
+            empty.set_margin_bottom(12);
+            inner.append(&empty);
+        }
+
+        let zone_len = zone_items.len();
+        for (zi_local, (idx, display)) in zone_items.iter().enumerate() {
+            let idx = *idx;
+            let row_box = GtkBox::new(Orientation::Horizontal, 4);
+            row_box.set_margin_top(2);
+            row_box.set_margin_bottom(2);
+
+            let name_lbl = Label::new(Some(display));
+            name_lbl.set_halign(gtk4::Align::Start);
+            name_lbl.set_hexpand(true);
+            row_box.append(&name_lbl);
+
+            // ▲ Move up within zone
+            let up_btn = Button::with_label("▲");
+            up_btn.set_sensitive(zi_local > 0);
+            up_btn.set_tooltip_text(Some("Move up"));
+            if zi_local > 0 {
+                let prev_idx = zone_items[zi_local - 1].0;
+                let is = items_state.clone();
+                let cont = container.clone();
+                let sl = status_label.clone();
+                up_btn.connect_clicked(move |_| {
+                    let mut v = is.borrow_mut();
+                    v.swap(idx, prev_idx);
+                    drop(v);
+                    rebuild_layout_zones(&cont, &is, &sl);
+                });
+            }
+            row_box.append(&up_btn);
+
+            // ▼ Move down within zone
+            let down_btn = Button::with_label("▼");
+            down_btn.set_sensitive(zi_local < zone_len - 1);
+            down_btn.set_tooltip_text(Some("Move down"));
+            if zi_local < zone_len - 1 {
+                let next_idx = zone_items[zi_local + 1].0;
+                let is = items_state.clone();
+                let cont = container.clone();
+                let sl = status_label.clone();
+                down_btn.connect_clicked(move |_| {
+                    let mut v = is.borrow_mut();
+                    v.swap(idx, next_idx);
+                    drop(v);
+                    rebuild_layout_zones(&cont, &is, &sl);
+                });
+            }
+            row_box.append(&down_btn);
+
+            // ← Move to left zone
+            let left_btn = Button::with_label("←");
+            left_btn.set_sensitive(zi > 0);
+            left_btn.set_tooltip_text(Some("Move left"));
+            if zi > 0 {
+                let is = items_state.clone();
+                let cont = container.clone();
+                let sl = status_label.clone();
+                let target = ZONES[zi - 1].to_string();
+                left_btn.connect_clicked(move |_| {
+                    is.borrow_mut()[idx].zone = target.clone();
+                    rebuild_layout_zones(&cont, &is, &sl);
+                });
+            }
+            row_box.append(&left_btn);
+
+            // → Move to right zone
+            let right_btn = Button::with_label("→");
+            right_btn.set_sensitive(zi < 2);
+            right_btn.set_tooltip_text(Some("Move right"));
+            if zi < 2 {
+                let is = items_state.clone();
+                let cont = container.clone();
+                let sl = status_label.clone();
+                let target = ZONES[zi + 1].to_string();
+                right_btn.connect_clicked(move |_| {
+                    is.borrow_mut()[idx].zone = target.clone();
+                    rebuild_layout_zones(&cont, &is, &sl);
+                });
+            }
+            row_box.append(&right_btn);
+
+            inner.append(&row_box);
+        }
+
+        frame.set_child(Some(&inner));
+        col.append(&frame);
+        container.append(&col);
+
+        if zi < 2 {
+            let sep = gtk4::Separator::new(Orientation::Vertical);
+            container.append(&sep);
+        }
+    }
+}
+
+fn save_layout_items(items: &[LayoutItem], theme_name: &str) {
+    // Reconstruct ThemeLayout from built-in item zones and Vec order
+    let mut layout = rdm_common::theme::load_theme_layout_for(theme_name);
+    let mut order: Vec<String> = Vec::new();
+    for item in items {
+        if item.kind == LayoutItemKind::Builtin {
+            match item.id.as_str() {
+                "launcher"  => layout.panel.launcher  = item.zone.clone(),
+                "taskbar"   => layout.panel.taskbar   = item.zone.clone(),
+                "clock"     => layout.panel.clock     = item.zone.clone(),
+                "sys_popup" => layout.panel.sys_popup = item.zone.clone(),
+                "tray"      => layout.panel.tray      = item.zone.clone(),
+                _ => {}
+            }
+            order.push(item.id.clone());
+        }
+    }
+    layout.panel.order = order;
+    if let Err(e) = rdm_common::theme::save_layout_for_theme(theme_name, &layout) {
+        log::error!("Failed to save layout.toml: {}", e);
+    }
+
+    // Update plugin positions in rdm.toml, preserving enabled/disabled state
+    let mut rows: Vec<PluginRow> = read_enabled_plugins()
+        .into_iter()
+        .map(|e| PluginRow { name: e.name, enabled: true, position: e.position })
+        .collect();
+    for item in items {
+        if item.kind == LayoutItemKind::Plugin {
+            if let Some(row) = rows.iter_mut().find(|r| r.name == item.id) {
+                row.position = item.zone.clone();
+            }
+        }
+    }
+    save_plugin_entries(&rows);
 }
 
 fn build_plugins_page() -> GtkBox {
