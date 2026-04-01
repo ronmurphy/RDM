@@ -47,6 +47,9 @@ pub struct PanelConfig {
     /// Taskbar display mode: "text", "icons", "nerd"
     #[serde(default = "default_taskbar_mode")]
     pub taskbar_mode: String,
+    /// Visual style applied to the panel: "default", "pill", "underline", "floating", "minimal"
+    #[serde(default = "default_panel_style")]
+    pub panel_style: String,
     /// External panel plugins loaded from shared libraries.
     #[serde(default)]
     pub plugins: Vec<PluginEntry>,
@@ -188,6 +191,9 @@ fn default_snap_threshold() -> i32 {
 fn default_taskbar_mode() -> String {
     "icons".into()
 }
+fn default_panel_style() -> String {
+    "default".into()
+}
 fn default_wallpaper_path() -> String {
     String::new()
 }
@@ -235,6 +241,7 @@ impl Default for PanelConfig {
             show_workspaces: true,
             clock_format: default_clock_format(),
             taskbar_mode: default_taskbar_mode(),
+            panel_style: default_panel_style(),
             plugins: Vec::new(),
         }
     }

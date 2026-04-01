@@ -345,6 +345,42 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     grid.attach(&header, 0, row, 2, 1);
     row += 1;
 
+    // Panel style
+    let lbl = Label::new(Some("Panel Style"));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.set_width_chars(16);
+    grid.attach(&lbl, 0, row, 1, 1);
+    const PANEL_STYLES: &[(&str, &str)] = &[
+        ("default",   "Default — flat bar"),
+        ("pill",      "Pill — rounded capsule buttons"),
+        ("underline", "Underline — accent bar on hover/active"),
+        ("floating",  "Floating — raised bar with rounded corners"),
+        ("minimal",   "Minimal — transparent, icons only"),
+        ("island",    "Island — each zone its own floating capsule"),
+        ("glass",     "Glass — translucent see-through bar"),
+        ("accent",    "Accent — bar filled with accent colour"),
+        ("neon",      "Neon — glowing accent highlights"),
+        ("compact",   "Compact — tight spacing, small font"),
+        ("bordered",  "Bordered — accent stripe along screen edge"),
+    ];
+    let style_labels: Vec<&str> = PANEL_STYLES.iter().map(|(_, l)| *l).collect();
+    let style_list = StringList::new(&style_labels);
+    let style_dd = DropDown::new(Some(style_list), gtk4::Expression::NONE);
+    let current_style = config.borrow().panel.panel_style.clone();
+    let selected_style = PANEL_STYLES
+        .iter()
+        .position(|(k, _)| *k == current_style.as_str())
+        .unwrap_or(0);
+    style_dd.set_selected(selected_style as u32);
+    let cfg = config.clone();
+    style_dd.connect_selected_notify(move |dd| {
+        if let Some(&(key, _)) = PANEL_STYLES.get(dd.selected() as usize) {
+            cfg.borrow_mut().panel.panel_style = key.to_string();
+        }
+    });
+    grid.attach(&style_dd, 1, row, 1, 1);
+    row += 1;
+
     // Taskbar mode
     let lbl = Label::new(Some("Taskbar Mode"));
     lbl.set_halign(gtk4::Align::Start);

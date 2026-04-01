@@ -275,6 +275,354 @@ calendar label.other-month {
 .battery-critical { color: @theme_red; }
 .battery-charging { color: @theme_cyan; }
 
+/* ── Panel Styles ──────────────────────────────────────────────── */
+
+/* ── Pill ──────────────────────────────────────────────────────── *
+ * Each widget gets a rounded pill shape. Zone boxes get a subtle
+ * tinted background with their own border-radius so groups of
+ * items read as cohesive capsules.
+ */
+.panel-style-pill .panel-left,
+.panel-style-pill .panel-center,
+.panel-style-pill .panel-right {
+    background-color: alpha(@theme_surface, 0.55);
+    border-radius: 999px;
+    padding: 0 6px;
+    margin: 3px 6px;
+}
+
+.panel-style-pill .launcher-btn,
+.panel-style-pill .tray-btn,
+.panel-style-pill .clock.tray-btn,
+.panel-style-pill .taskbar-item,
+.panel-style-pill .sni-item.image-button {
+    border-radius: 999px;
+    padding: 2px 14px;
+}
+
+.panel-style-pill .taskbar-icon,
+.panel-style-pill .taskbar-nerd {
+    border-radius: 999px;
+}
+
+.panel-style-pill .launcher-btn:hover,
+.panel-style-pill .tray-btn:hover,
+.panel-style-pill .clock.tray-btn:hover {
+    background-color: alpha(@theme_accent, 0.18);
+}
+
+.panel-style-pill .taskbar-item.active {
+    background-color: @theme_accent;
+    color: @theme_bg;
+    border-radius: 999px;
+}
+
+/* ── Underline ─────────────────────────────────────────────────── *
+ * Flat panel; a colored bar slides under items on hover/active.
+ * Uses NF-compatible padding so the bar sits flush at the bottom.
+ */
+.panel-style-underline .launcher-btn,
+.panel-style-underline .tray-btn,
+.panel-style-underline .clock.tray-btn,
+.panel-style-underline .taskbar-item {
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    border-top: 2px solid transparent; /* keeps height stable */
+    background: transparent;
+    padding-bottom: 2px;
+}
+
+.panel-style-underline .launcher-btn:hover,
+.panel-style-underline .tray-btn:hover,
+.panel-style-underline .clock.tray-btn:hover {
+    border-bottom-color: @theme_accent;
+    background: transparent;
+}
+
+.panel-style-underline .taskbar-item:hover {
+    border-bottom-color: @theme_subtle;
+    background: transparent;
+}
+
+.panel-style-underline .taskbar-item.active {
+    border-bottom-color: @theme_accent;
+    background: transparent;
+    color: @theme_accent;
+    font-weight: bold;
+}
+
+.panel-style-underline .taskbar-item.minimized {
+    border-bottom-color: @theme_muted;
+    opacity: 0.6;
+}
+
+/* ── Floating ──────────────────────────────────────────────────── *
+ * Panel floats above the desktop with rounded corners and a
+ * soft shadow. The layer-shell window sets matching margins so
+ * the exclusive zone accounts for the gap.
+ */
+.panel-floating-window {
+    background: transparent;
+}
+
+.panel-style-floating {
+    border-radius: 10px;
+    border: 1px solid alpha(@theme_border, 0.6);
+    box-shadow: 0 3px 12px alpha(black, 0.4);
+    margin: 0 2px;
+}
+
+.panel-style-floating .launcher-btn { border-radius: 8px 0 0 8px; }
+.panel-style-floating .tray-btn     { border-radius: 0 8px 8px 0; }
+.panel-style-floating .taskbar-item { border-radius: 6px; }
+
+/* ── Minimal ───────────────────────────────────────────────────── *
+ * Strip all backgrounds and borders. Pure text/icons on a
+ * fully transparent bar — compositor renders the desktop through.
+ */
+.panel-style-minimal {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0 4px;
+}
+
+.panel-style-minimal .launcher-btn,
+.panel-style-minimal .tray-btn,
+.panel-style-minimal .clock.tray-btn,
+.panel-style-minimal .taskbar-item,
+.panel-style-minimal .sni-item.image-button {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 4px;
+}
+
+.panel-style-minimal .launcher-btn:hover,
+.panel-style-minimal .tray-btn:hover,
+.panel-style-minimal .clock.tray-btn:hover,
+.panel-style-minimal .sni-item.image-button:hover {
+    background-color: alpha(@theme_surface, 0.35);
+}
+
+.panel-style-minimal .taskbar-item:hover {
+    background-color: alpha(@theme_surface, 0.35);
+}
+
+.panel-style-minimal .taskbar-item.active {
+    background-color: alpha(@theme_accent, 0.22);
+    color: @theme_accent;
+}
+
+/* ── Island ────────────────────────────────────────────────────── *
+ * Each zone floats as its own rounded capsule with a gap between
+ * them. The panel background is transparent so only the zone
+ * boxes are visible.
+ */
+.panel-style-island {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.panel-style-island .panel-left,
+.panel-style-island .panel-center,
+.panel-style-island .panel-right {
+    background-color: @theme_bg;
+    border-radius: 10px;
+    border: 1px solid alpha(@theme_border, 0.55);
+    box-shadow: 0 2px 8px alpha(black, 0.35);
+    padding: 0 6px;
+    margin: 3px 8px;
+}
+
+.panel-style-island .launcher-btn,
+.panel-style-island .tray-btn,
+.panel-style-island .clock.tray-btn,
+.panel-style-island .taskbar-item {
+    border-radius: 6px;
+}
+
+.panel-style-island .launcher-btn:hover,
+.panel-style-island .tray-btn:hover,
+.panel-style-island .clock.tray-btn:hover {
+    background-color: alpha(@theme_accent, 0.15);
+}
+
+.panel-style-island .taskbar-item.active {
+    background-color: @theme_accent;
+    color: @theme_bg;
+}
+
+/* ── Glass ─────────────────────────────────────────────────────── *
+ * Full-width bar with a translucent background — the desktop
+ * shows through. A faint border along the outer edge grounds it.
+ */
+.panel-style-glass {
+    background-color: alpha(@theme_bg, 0.62);
+    border-bottom: 1px solid alpha(@theme_border, 0.35);
+    box-shadow: 0 1px 6px alpha(black, 0.25);
+}
+
+.panel-style-glass .launcher-btn:hover,
+.panel-style-glass .tray-btn:hover,
+.panel-style-glass .clock.tray-btn:hover,
+.panel-style-glass .taskbar-item:hover {
+    background-color: alpha(@theme_surface, 0.5);
+}
+
+.panel-style-glass .taskbar-item.active {
+    background-color: alpha(@theme_accent, 0.28);
+    color: @theme_accent;
+    font-weight: bold;
+}
+
+/* ── Accent ────────────────────────────────────────────────────── *
+ * Inverted panel — background uses the theme accent colour so the
+ * bar pops against the desktop. Text and icons flip to contrast.
+ */
+.panel-style-accent {
+    background-color: @theme_accent;
+    color: @theme_bg;
+}
+
+.panel-style-accent .launcher-btn,
+.panel-style-accent .tray-btn,
+.panel-style-accent .clock.tray-btn,
+.panel-style-accent .taskbar-item {
+    color: @theme_bg;
+    background: transparent;
+    border-radius: 4px;
+}
+
+.panel-style-accent .launcher-btn:hover,
+.panel-style-accent .tray-btn:hover,
+.panel-style-accent .clock.tray-btn:hover,
+.panel-style-accent .taskbar-item:hover {
+    background-color: alpha(black, 0.18);
+}
+
+.panel-style-accent .taskbar-item.active {
+    background-color: alpha(black, 0.28);
+    color: @theme_bg;
+    font-weight: bold;
+}
+
+.panel-style-accent .taskbar-item.minimized {
+    opacity: 0.6;
+}
+
+/* ── Neon ──────────────────────────────────────────────────────── *
+ * Dark opaque bar with a glowing accent underline. Hovered and
+ * active items gain a coloured glow via box-shadow. Works best
+ * with high-contrast themes (Tokyo Night, Catppuccin Mocha, etc).
+ */
+.panel-style-neon {
+    background-color: @theme_bg;
+    border-bottom: 1px solid @theme_accent;
+    box-shadow: 0 0 8px alpha(@theme_accent, 0.35);
+}
+
+.panel-style-neon .launcher-btn,
+.panel-style-neon .tray-btn,
+.panel-style-neon .clock.tray-btn,
+.panel-style-neon .taskbar-item {
+    background: transparent;
+    border-radius: 4px;
+}
+
+.panel-style-neon .launcher-btn:hover,
+.panel-style-neon .tray-btn:hover,
+.panel-style-neon .clock.tray-btn:hover {
+    color: @theme_accent;
+    background-color: alpha(@theme_accent, 0.1);
+    box-shadow: 0 0 8px alpha(@theme_accent, 0.45);
+}
+
+.panel-style-neon .taskbar-item:hover {
+    color: @theme_accent;
+    background-color: alpha(@theme_accent, 0.1);
+}
+
+.panel-style-neon .taskbar-item.active {
+    color: @theme_accent;
+    background-color: alpha(@theme_accent, 0.15);
+    box-shadow: 0 0 10px alpha(@theme_accent, 0.5);
+    font-weight: bold;
+}
+
+/* ── Compact ───────────────────────────────────────────────────── *
+ * Tighter padding and smaller font throughout — maximises
+ * vertical screen space on small monitors or dense setups.
+ */
+.panel-style-compact {
+    padding: 0 4px;
+    font-size: 11px;
+}
+
+.panel-style-compact .launcher-btn,
+.panel-style-compact .tray-btn,
+.panel-style-compact .clock.tray-btn {
+    padding: 1px 8px;
+    font-size: 11px;
+}
+
+.panel-style-compact .taskbar-item {
+    padding: 1px 6px;
+    font-size: 11px;
+}
+
+.panel-style-compact .taskbar-icon {
+    padding: 1px 4px;
+    min-width: 22px;
+}
+
+.panel-style-compact .taskbar-nerd {
+    padding: 1px 5px;
+    min-width: 22px;
+    font-size: 13px;
+}
+
+.panel-style-compact .sni-item.image-button {
+    min-width: 0;
+    padding: 0 4px;
+}
+
+/* ── Bordered ──────────────────────────────────────────────────── *
+ * Near-opaque bar with a bold accent stripe along the outer edge.
+ * Individual items grow their own matching underline on hover/active
+ * so the border reads as a continuous theme rather than decoration.
+ */
+.panel-style-bordered {
+    background-color: alpha(@theme_bg, 0.92);
+    border-bottom: 3px solid @theme_accent;
+}
+
+.panel-style-bordered .launcher-btn,
+.panel-style-bordered .tray-btn,
+.panel-style-bordered .clock.tray-btn,
+.panel-style-bordered .taskbar-item {
+    border-radius: 0;
+    border-bottom: 3px solid transparent;
+    padding-bottom: 1px;
+}
+
+.panel-style-bordered .launcher-btn:hover,
+.panel-style-bordered .tray-btn:hover,
+.panel-style-bordered .clock.tray-btn:hover,
+.panel-style-bordered .taskbar-item:hover {
+    background-color: @theme_surface;
+    border-bottom-color: @theme_accent;
+}
+
+.panel-style-bordered .taskbar-item.active {
+    background-color: @theme_surface;
+    color: @theme_accent;
+    border-bottom-color: @theme_accent;
+    font-weight: bold;
+}
+
 .wifi-dialog-title {
     font-weight: bold;
     font-size: 14px;

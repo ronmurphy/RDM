@@ -218,13 +218,41 @@ fn build_panel_window(
 
     window.auto_exclusive_zone_enable();
 
+    // Apply panel style: CSS class on the panel box + layer-shell margins for floating.
+    // Island and floating need a transparent window so only the zone/panel box
+    // backgrounds are visible.
+    let style = config.panel.panel_style.as_str();
+    match style {
+        "floating" => {
+            let gap: i32 = 4;
+            window.set_margin(Edge::Left, 8);
+            window.set_margin(Edge::Right, 8);
+            if at_top {
+                window.set_margin(Edge::Top, gap);
+            } else {
+                window.set_margin(Edge::Bottom, gap);
+            }
+            window.add_css_class("panel-floating-window");
+        }
+        "island" | "glass" | "minimal" => {
+            window.add_css_class("panel-floating-window");
+        }
+        _ => {}
+    }
+
     // Main horizontal layout split into left/center/right zones.
     let center_box = gtk4::CenterBox::new();
     center_box.add_css_class("panel");
+    if style != "default" {
+        center_box.add_css_class(&format!("panel-style-{}", style));
+    }
 
     let left_zone = gtk4::Box::new(Orientation::Horizontal, 4);
     let center_zone = gtk4::Box::new(Orientation::Horizontal, 4);
     let right_zone = gtk4::Box::new(Orientation::Horizontal, 4);
+    left_zone.add_css_class("panel-left");
+    center_zone.add_css_class("panel-center");
+    right_zone.add_css_class("panel-right");
 
     center_zone.set_halign(gtk4::Align::Center);
     center_zone.set_hexpand(true);
