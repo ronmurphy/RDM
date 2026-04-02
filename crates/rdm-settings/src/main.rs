@@ -104,18 +104,21 @@ fn build_ui(app: &Application) {
     sidebar.set_stack(&stack);
     sidebar.set_size_request(140, -1);
 
-    // --- Appearance page ---
-    let (appearance_page, refresh_appearance_themes) =
+    // --- Appearance page (includes theme editor expander) ---
+    let (appearance_page, theme_editor_expander, refresh_appearance_themes) =
         build_appearance_page(&config, &themes_state);
+    let theme_editor_section = build_theme_editor_section(
+        &window,
+        themes_state.clone(),
+        refresh_appearance_themes,
+    );
+    theme_editor_expander.set_child(Some(&theme_editor_section));
+    appearance_page.append(&theme_editor_expander);
     stack.add_titled(&appearance_page, Some("appearance"), "Appearance");
 
-    // --- Panel page ---
-    let panel_page = build_panel_page(&config);
+    // --- Panel page (includes layout section) ---
+    let (panel_page, save_layout) = build_panel_page(&config);
     stack.add_titled(&panel_page, Some("panel"), "Panel");
-
-    // --- Panel Layout page ---
-    let (panel_layout_page, save_layout) = build_panel_layout_page(&config);
-    stack.add_titled(&panel_layout_page, Some("panel-layout"), "Layout");
 
     // --- Wallpaper page ---
     let wallpaper_page = build_wallpaper_page(&config, &window);
@@ -125,18 +128,9 @@ fn build_ui(app: &Application) {
     let displays_page = build_displays_page(&config);
     stack.add_titled(&displays_page, Some("displays"), "Displays");
 
-    // --- Plugins page ---
-    let plugins_page = build_plugins_page();
-    stack.add_titled(&plugins_page, Some("plugins"), "Plugins");
-
     // --- Diagnostics page ---
     let diagnostics_page = build_diagnostics_page();
     stack.add_titled(&diagnostics_page, Some("diagnostics"), "Diagnostics");
-
-    // --- Theme Editor page ---
-    let theme_editor_page =
-        build_theme_editor_page(&window, themes_state.clone(), refresh_appearance_themes);
-    stack.add_titled(&theme_editor_page, Some("theme-editor"), "Theme Editor");
 
     // --- Main layout ---
     let main_box = GtkBox::new(Orientation::Vertical, 0);
@@ -214,7 +208,7 @@ fn build_ui(app: &Application) {
 fn build_appearance_page(
     config: &Rc<RefCell<RdmConfig>>,
     themes_state: &Rc<RefCell<Vec<ThemeMeta>>>,
-) -> (GtkBox, Rc<dyn Fn()>) {
+) -> (GtkBox, gtk4::Expander, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
@@ -295,11 +289,20 @@ fn build_appearance_page(
 
     page.append(&grid);
 
+    // ── Theme Editor (collapsed expander) ────────────────────
+    let sep = gtk4::Separator::new(Orientation::Horizontal);
+    sep.set_margin_top(12);
+    sep.set_margin_bottom(4);
+    page.append(&sep);
+
+    let expander = gtk4::Expander::new(Some("Customize Theme"));
+    expander.set_margin_top(4);
+
     let dropdown_for_refresh = theme_dropdown.clone();
     let desc_for_refresh = desc.clone();
     let cfg_for_refresh = config.clone();
     let themes_for_refresh = themes_state.clone();
-    let refresh = Rc::new(move || {
+    let refresh: Rc<dyn Fn()> = Rc::new(move || {
         let current_theme = cfg_for_refresh.borrow().appearance.theme.clone();
         let new_themes = rdm_common::theme::list_themes();
         *themes_for_refresh.borrow_mut() = new_themes.clone();
@@ -321,12 +324,12 @@ fn build_appearance_page(
         }
     });
 
-    (page, refresh)
+    (page, expander, refresh)
 }
 
 // ─── Panel Settings ──────────────────────────────────────────────
 
-fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
+fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_margin_top(20);
     page.set_margin_bottom(20);
@@ -578,7 +581,17 @@ fn build_panel_page(config: &Rc<RefCell<RdmConfig>>) -> GtkBox {
     let _ = row;
 
     page.append(&grid);
-    page
+
+    // ── Layout section ───────────────────────────────────────
+    let layout_sep = gtk4::Separator::new(Orientation::Horizontal);
+    layout_sep.set_margin_top(12);
+    layout_sep.set_margin_bottom(4);
+    page.append(&layout_sep);
+
+    let (layout_section, save_layout) = build_layout_section(config);
+    page.append(&layout_section);
+
+    (page, save_layout)
 }
 
 // ─── Wallpaper Settings ──────────────────────────────────────────
@@ -735,27 +748,17 @@ fn build_wallpaper_page(config: &Rc<RefCell<RdmConfig>>, window: &ApplicationWin
 
 // ─── Theme Editor ────────────────────────────────────────────────
 
-fn build_theme_editor_page(
+fn build_theme_editor_section(
     window: &ApplicationWindow,
     themes_state: Rc<RefCell<Vec<ThemeMeta>>>,
     refresh_appearance_themes: Rc<dyn Fn()>,
 ) -> GtkBox {
     let page = GtkBox::new(Orientation::Vertical, 0);
-    page.set_margin_top(20);
-    page.set_margin_bottom(20);
-    page.set_margin_start(20);
-    page.set_margin_end(20);
 
     let settings_grid = gtk4::Grid::new();
     settings_grid.set_row_spacing(8);
     settings_grid.set_column_spacing(12);
     let mut row: i32 = 0;
-
-    let header = Label::new(Some("Theme Editor"));
-    header.add_css_class("settings-header");
-    header.set_halign(gtk4::Align::Start);
-    settings_grid.attach(&header, 0, row, 2, 1);
-    row += 1;
 
     let hint = Label::new(Some(
         "Pick a base theme, tweak colors, then save as a new theme.",
@@ -2292,6 +2295,7 @@ struct LayoutItem {
     display: String,
     kind: LayoutItemKind,
     zone: String, // "left", "center", or "right"
+    enabled: bool, // builtins are always true; plugins can be toggled
 }
 
 /// Search paths for plugin .so files (mirrors rdm-panel's plugin_loader).
@@ -2447,48 +2451,60 @@ fn save_plugin_entries(rows: &[PluginRow]) {
     }
 }
 
-// ─── Panel Layout Page ───────────────────────────────────────────
+// ─── Panel Layout Section ─────────────────────────────────────────
 
-fn build_panel_layout_page(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()>) {
+fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 0);
-    page.set_margin_top(20);
-    page.set_margin_bottom(20);
-    page.set_margin_start(20);
-    page.set_margin_end(20);
 
-    let header = Label::new(Some("Panel Layout"));
+    let header = Label::new(Some("Layout"));
     header.add_css_class("settings-header");
     header.set_halign(gtk4::Align::Start);
     page.append(&header);
 
     let hint = Label::new(Some(
-        "Assign panel items to Left, Center, or Right zones. Changes take effect after Save & Reload.",
+        "Assign panel items to Left, Center, or Right zones. Check the box to enable plugins.",
     ));
     hint.add_css_class("settings-hint");
     hint.set_halign(gtk4::Align::Start);
     hint.set_wrap(true);
-    hint.set_margin_bottom(16);
+    hint.set_margin_bottom(12);
     page.append(&hint);
 
     // Load current layout for the active theme
     let theme_name = config.borrow().appearance.theme.clone();
     let layout = rdm_common::theme::load_theme_layout_for(&theme_name);
 
-    // Built-in items first, then all configured plugins
+    // Built-in items (always enabled), then discovered plugins merged with config
     let mut items: Vec<LayoutItem> = vec![
-        LayoutItem { id: "launcher".to_string(),  display: "Launcher".to_string(),  kind: LayoutItemKind::Builtin, zone: layout.panel.launcher.clone()  },
-        LayoutItem { id: "taskbar".to_string(),   display: "Taskbar".to_string(),   kind: LayoutItemKind::Builtin, zone: layout.panel.taskbar.clone()   },
-        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::Builtin, zone: layout.panel.clock.clone()     },
-        LayoutItem { id: "sys_popup".to_string(), display: "Sys Popup".to_string(), kind: LayoutItemKind::Builtin, zone: layout.panel.sys_popup.clone() },
-        LayoutItem { id: "tray".to_string(),      display: "Tray".to_string(),      kind: LayoutItemKind::Builtin, zone: layout.panel.tray.clone()      },
+        LayoutItem { id: "launcher".to_string(),  display: "Launcher".to_string(),  kind: LayoutItemKind::Builtin, zone: layout.panel.launcher.clone(),  enabled: true },
+        LayoutItem { id: "taskbar".to_string(),   display: "Taskbar".to_string(),   kind: LayoutItemKind::Builtin, zone: layout.panel.taskbar.clone(),   enabled: true },
+        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::Builtin, zone: layout.panel.clock.clone(),     enabled: true },
+        LayoutItem { id: "sys_popup".to_string(), display: "Sys Popup".to_string(), kind: LayoutItemKind::Builtin, zone: layout.panel.sys_popup.clone(), enabled: true },
+        LayoutItem { id: "tray".to_string(),      display: "Tray".to_string(),      kind: LayoutItemKind::Builtin, zone: layout.panel.tray.clone(),      enabled: true },
     ];
-    for plugin in &config.borrow().panel.plugins {
+
+    // Enabled plugins from config first (preserves order)
+    let enabled_plugins = read_enabled_plugins();
+    for plugin in &enabled_plugins {
         items.push(LayoutItem {
             id: plugin.name.clone(),
             display: plugin.name.clone(),
             kind: LayoutItemKind::Plugin,
             zone: plugin.position.clone(),
+            enabled: true,
         });
+    }
+    // Discovered-but-not-enabled plugins at the bottom
+    for disc in discover_plugins() {
+        if !items.iter().any(|i| i.id == disc.name) {
+            items.push(LayoutItem {
+                id: disc.name.clone(),
+                display: disc.name.clone(),
+                kind: LayoutItemKind::Plugin,
+                zone: "right".to_string(),
+                enabled: false,
+            });
+        }
     }
 
     let items_state = Rc::new(RefCell::new(items));
@@ -2508,7 +2524,6 @@ fn build_panel_layout_page(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn F
     btn_box.set_margin_top(12);
     btn_box.set_halign(gtk4::Align::End);
 
-    // Build a shared save closure so both the button and the main Apply can trigger it
     let save_cb: Rc<dyn Fn()> = {
         let is = items_state.clone();
         let cfg = config.clone();
@@ -2570,11 +2585,11 @@ fn rebuild_layout_zones(
         inner.set_margin_start(8);
         inner.set_margin_end(8);
 
-        // Collect (global_index, display_name) for items in this zone
+        // Collect (global_index, display_name) for enabled items in this zone
         let zone_items: Vec<(usize, String)> = items
             .iter()
             .enumerate()
-            .filter(|(_, item)| item.zone == zone)
+            .filter(|(_, item)| item.zone == zone && item.enabled)
             .map(|(idx, item)| (idx, item.display.clone()))
             .collect();
 
@@ -2598,6 +2613,22 @@ fn rebuild_layout_zones(
             name_lbl.set_halign(gtk4::Align::Start);
             name_lbl.set_hexpand(true);
             row_box.append(&name_lbl);
+
+            // Plugin items get a disable checkbox (builtins are always on)
+            let is_plugin = items[idx].kind == LayoutItemKind::Plugin;
+            if is_plugin {
+                let check = CheckButton::new();
+                check.set_active(true);
+                check.set_tooltip_text(Some("Uncheck to disable plugin"));
+                let is2 = items_state.clone();
+                let cont2 = container.clone();
+                let sl2 = status_label.clone();
+                check.connect_toggled(move |cb| {
+                    is2.borrow_mut()[idx].enabled = cb.is_active();
+                    rebuild_layout_zones(&cont2, &is2, &sl2);
+                });
+                row_box.append(&check);
+            }
 
             // ▲ Move up within zone
             let up_btn = Button::with_label("▲");
@@ -2679,6 +2710,46 @@ fn rebuild_layout_zones(
             container.append(&sep);
         }
     }
+
+    // ── Disabled plugins row (below the three zone columns) ──
+    // Rendered outside the horizontal zones_container by appending to its parent.
+    // We access the parent GtkBox via container's parent widget.
+    let disabled: Vec<(usize, String)> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.kind == LayoutItemKind::Plugin && !item.enabled)
+        .map(|(idx, item)| (idx, item.display.clone()))
+        .collect();
+
+    if !disabled.is_empty() {
+        if let Some(parent) = container.parent() {
+            if let Some(parent_box) = parent.downcast_ref::<GtkBox>() {
+                let dis_lbl = Label::new(Some("Disabled plugins:"));
+                dis_lbl.add_css_class("settings-hint");
+                dis_lbl.set_halign(gtk4::Align::Start);
+                dis_lbl.set_margin_top(8);
+                parent_box.append(&dis_lbl);
+
+                let dis_row = GtkBox::new(Orientation::Horizontal, 8);
+                dis_row.set_margin_top(2);
+
+                for (idx, name) in disabled {
+                    let check = CheckButton::with_label(&name);
+                    check.set_active(false);
+                    check.set_tooltip_text(Some("Check to enable plugin"));
+                    let is2 = items_state.clone();
+                    let cont2 = container.clone();
+                    let sl2 = status_label.clone();
+                    check.connect_toggled(move |cb| {
+                        is2.borrow_mut()[idx].enabled = cb.is_active();
+                        rebuild_layout_zones(&cont2, &is2, &sl2);
+                    });
+                    dis_row.append(&check);
+                }
+                parent_box.append(&dis_row);
+            }
+        }
+    }
 }
 
 fn save_layout_items(items: &[LayoutItem], theme_name: &str) {
@@ -2703,206 +2774,15 @@ fn save_layout_items(items: &[LayoutItem], theme_name: &str) {
         log::error!("Failed to save layout.toml: {}", e);
     }
 
-    // Update plugin positions in rdm.toml, preserving enabled/disabled state
-    let mut rows: Vec<PluginRow> = read_enabled_plugins()
-        .into_iter()
-        .map(|e| PluginRow { name: e.name, enabled: true, position: e.position })
+    // Write plugin entries from LayoutItems directly (enabled + position)
+    let rows: Vec<PluginRow> = items
+        .iter()
+        .filter(|i| i.kind == LayoutItemKind::Plugin)
+        .map(|i| PluginRow { name: i.id.clone(), enabled: i.enabled, position: i.zone.clone() })
         .collect();
-    for item in items {
-        if item.kind == LayoutItemKind::Plugin {
-            if let Some(row) = rows.iter_mut().find(|r| r.name == item.id) {
-                row.position = item.zone.clone();
-            }
-        }
-    }
     save_plugin_entries(&rows);
 }
 
-fn build_plugins_page() -> GtkBox {
-    let page = GtkBox::new(Orientation::Vertical, 0);
-    page.set_margin_top(20);
-    page.set_margin_bottom(20);
-    page.set_margin_start(20);
-    page.set_margin_end(20);
-
-    let header = Label::new(Some("Panel Plugins"));
-    header.add_css_class("settings-header");
-    header.set_halign(gtk4::Align::Start);
-    page.append(&header);
-
-    let hint = Label::new(Some(
-        "Enable, disable, and reorder panel plugins. Changes take effect after Save & Reload.",
-    ));
-    hint.add_css_class("settings-hint");
-    hint.set_halign(gtk4::Align::Start);
-    hint.set_margin_bottom(12);
-    hint.set_wrap(true);
-    page.append(&hint);
-
-    // Merge discovered plugins with current config
-    let discovered = discover_plugins();
-    let enabled_entries = read_enabled_plugins();
-
-    let mut rows: Vec<PluginRow> = Vec::new();
-
-    // Enabled plugins first (preserve config order)
-    for entry in &enabled_entries {
-        rows.push(PluginRow {
-            name: entry.name.clone(),
-            enabled: true,
-            position: entry.position.clone(),
-        });
-    }
-
-    // Newly discovered plugins that aren't enabled yet
-    for disc in &discovered {
-        if !rows.iter().any(|r| r.name == disc.name) {
-            rows.push(PluginRow {
-                name: disc.name.clone(),
-                enabled: false,
-                position: "right".to_string(),
-            });
-        }
-    }
-
-    let rows_state = Rc::new(RefCell::new(rows));
-    let list_container = Rc::new(GtkBox::new(Orientation::Vertical, 0));
-    let status_label = Rc::new(Label::new(None));
-    status_label.set_halign(gtk4::Align::Start);
-    status_label.set_margin_top(8);
-
-    rebuild_plugin_list(&list_container, &rows_state, &status_label);
-    page.append(list_container.as_ref());
-
-    // Bottom buttons
-    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
-    btn_box.set_margin_top(12);
-    btn_box.set_halign(gtk4::Align::End);
-
-    let save_btn = Button::with_label("Save & Reload");
-    save_btn.add_css_class("suggested-action");
-    let rs = rows_state.clone();
-    let sl = status_label.clone();
-    save_btn.connect_clicked(move |_| {
-        save_plugin_entries(&rs.borrow());
-        let _ = std::process::Command::new("rdm-reload").status();
-        sl.set_text("Saved and reloading…");
-    });
-    btn_box.append(&save_btn);
-    page.append(&btn_box);
-    page.append(status_label.as_ref());
-
-    page
-}
-
-fn rebuild_plugin_list(
-    container: &Rc<GtkBox>,
-    rows_state: &Rc<RefCell<Vec<PluginRow>>>,
-    status_label: &Rc<Label>,
-) {
-    while let Some(child) = container.first_child() {
-        container.remove(&child);
-    }
-
-    let rows = rows_state.borrow();
-
-    for (idx, row) in rows.iter().enumerate() {
-        let row_box = GtkBox::new(Orientation::Horizontal, 8);
-        row_box.set_margin_top(4);
-        row_box.set_margin_bottom(4);
-
-        // Enabled checkbox
-        let check = CheckButton::new();
-        check.set_active(row.enabled);
-        {
-            let rs = rows_state.clone();
-            let cont = container.clone();
-            let sl = status_label.clone();
-            check.connect_toggled(move |cb| {
-                rs.borrow_mut()[idx].enabled = cb.is_active();
-                rebuild_plugin_list(&cont, &rs, &sl);
-            });
-        }
-        row_box.append(&check);
-
-        // Plugin name
-        let name_label = Label::new(Some(&row.name));
-        name_label.set_halign(gtk4::Align::Start);
-        name_label.set_hexpand(true);
-        name_label.set_width_chars(18);
-        if !row.enabled {
-            name_label.set_opacity(0.5);
-        }
-        row_box.append(&name_label);
-
-        // Position dropdown
-        let positions = StringList::new(&["left", "center", "right"]);
-        let pos_dd = DropDown::new(Some(positions), gtk4::Expression::NONE);
-        pos_dd.set_selected(match row.position.as_str() {
-            "left" => 0,
-            "center" => 1,
-            _ => 2,
-        });
-        pos_dd.set_sensitive(row.enabled);
-        {
-            let rs = rows_state.clone();
-            pos_dd.connect_selected_notify(move |dd| {
-                let pos = match dd.selected() {
-                    0 => "left",
-                    1 => "center",
-                    _ => "right",
-                };
-                rs.borrow_mut()[idx].position = pos.to_string();
-            });
-        }
-        row_box.append(&pos_dd);
-
-        // Up button
-        let up_btn = Button::with_label("▲");
-        up_btn.set_sensitive(idx > 0);
-        up_btn.set_tooltip_text(Some("Move up"));
-        {
-            let rs = rows_state.clone();
-            let cont = container.clone();
-            let sl = status_label.clone();
-            up_btn.connect_clicked(move |_| {
-                {
-                    let mut r = rs.borrow_mut();
-                    if idx > 0 { r.swap(idx, idx - 1); }
-                }
-                rebuild_plugin_list(&cont, &rs, &sl);
-            });
-        }
-        row_box.append(&up_btn);
-
-        // Down button
-        let down_btn = Button::with_label("▼");
-        down_btn.set_sensitive(idx < rows.len() - 1);
-        down_btn.set_tooltip_text(Some("Move down"));
-        {
-            let rs = rows_state.clone();
-            let cont = container.clone();
-            let sl = status_label.clone();
-            down_btn.connect_clicked(move |_| {
-                {
-                    let mut r = rs.borrow_mut();
-                    if idx < r.len() - 1 { r.swap(idx, idx + 1); }
-                }
-                rebuild_plugin_list(&cont, &rs, &sl);
-            });
-        }
-        row_box.append(&down_btn);
-
-        container.append(&row_box);
-    }
-
-    if rows.is_empty() {
-        let empty = Label::new(Some("No plugins found. Place .so files in ~/.local/share/rdm/plugins/"));
-        empty.add_css_class("settings-hint");
-        empty.set_margin_top(20);
-        container.append(&empty);
-    }
-}
 
 fn load_css() {
     let css = CssProvider::new();
