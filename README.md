@@ -16,6 +16,10 @@ A lightweight, modular Wayland desktop environment built from scratch in **Rust 
 Desktop, with applications launcher and settings opened.
 <img width="1438" height="602" alt="Screenshot_20260309-202526" src="https://github.com/user-attachments/assets/813104d9-e399-4c65-b185-6df7192b126a" />
 
+Updated desktop, terminal plugin, NoTerm and updated Settings manage
+<img width="2557" height="1082" alt="20260401_23h24m44s_grim" src="https://github.com/user-attachments/assets/4e14de74-e967-41ff-80d6-53b0f7bf716a" />
+
+
 
 ---
 
