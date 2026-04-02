@@ -1212,6 +1212,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdm-panel-cmdcenter"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "chrono",
+ "gtk4",
+ "rdm-panel-api",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "rdm-panel-hello"
 version = "0.1.0"
 dependencies = [

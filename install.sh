@@ -187,7 +187,11 @@ if [ ! -f "$LABWC_DIR/rc.xml" ]; then
     cp config/labwc-rc.xml "$LABWC_DIR/rc.xml"
     ok "Copied labwc-rc.xml → $LABWC_DIR/rc.xml"
 else
-    ok "labwc rc.xml already exists (not overwriting)"
+    # Always update from the template so keybindings stay current.
+    # Back up the existing file first so any custom changes aren't lost.
+    cp "$LABWC_DIR/rc.xml" "$LABWC_DIR/rc.xml.bak"
+    cp config/labwc-rc.xml "$LABWC_DIR/rc.xml"
+    ok "Updated labwc rc.xml (previous saved as rc.xml.bak)"
 fi
 
 # ─── Install portal config ─────────────────────────────────────

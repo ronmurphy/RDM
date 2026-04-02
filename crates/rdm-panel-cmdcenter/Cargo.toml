@@ -1,0 +1,15 @@
+[package]
+name    = "rdm-panel-cmdcenter"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name       = "rdm_panel_cmdcenter"
+crate-type = ["cdylib"]
+
+[dependencies]
+rdm-panel-api = { workspace = true }
+gtk4          = { workspace = true }
+toml          = { workspace = true }
+chrono        = { workspace = true }
+async-channel = { workspace = true }

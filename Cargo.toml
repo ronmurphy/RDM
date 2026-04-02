@@ -7,6 +7,7 @@ members = [
     "crates/rdm-panel-swaylock",
     "crates/rdm-panel-clipboard",
     "crates/rdm-panel-terminal",
+    "crates/rdm-panel-cmdcenter",
     "crates/rdm-launcher",
     "crates/rdm-snap",
     "crates/rdm-session",
