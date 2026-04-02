@@ -41,13 +41,32 @@ fn search_paths() -> Vec<PathBuf> {
     paths.push(PathBuf::from("/usr/local/lib/rdm/plugins"));
     paths.push(PathBuf::from("/usr/lib/rdm/plugins"));
 
+    // Cargo target dirs for development builds. This allows `cargo run` from
+    // workspace root (target/debug, target/release) and the dependency dirs.
+    if let Ok(cargo_target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        paths.push(PathBuf::from(&cargo_target_dir));
+        paths.push(PathBuf::from(&cargo_target_dir).join("debug"));
+        paths.push(PathBuf::from(&cargo_target_dir).join("release"));
+    }
+    paths.push(PathBuf::from("target/debug"));
+    paths.push(PathBuf::from("target/release"));
+
     // Dev/local convenience: directory next to the binary.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+            paths.push(dir.to_path_buf());
             paths.push(dir.join("rdm-plugins"));
+            paths.push(dir.join("deps"));
         }
     }
 
+    if let Ok(current_dir) = std::env::current_dir() {
+        paths.push(current_dir);
+    }
+
+    paths.dedup();
+
+    log::debug!("plugin loader search paths: {:?}", paths);
     paths
 }
 
@@ -55,6 +74,7 @@ fn search_paths() -> Vec<PathBuf> {
 /// listed in `wanted` are skipped (pass `None` to load everything found).
 pub fn load_plugins(wanted: Option<&[String]>) {
     for dir in search_paths() {
+        log::debug!("plugin loader scanning dir: {:?}", dir);
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -66,6 +86,7 @@ pub fn load_plugins(wanted: Option<&[String]>) {
             if ext != "so" {
                 continue;
             }
+            log::debug!("plugin loader found candidate: {:?}", path);
             try_load_plugin(&path, wanted);
         }
     }

@@ -6,6 +6,7 @@ members = [
     "crates/rdm-panel-hello",
     "crates/rdm-panel-swaylock",
     "crates/rdm-panel-clipboard",
+    "crates/rdm-panel-terminal",
     "crates/rdm-launcher",
     "crates/rdm-snap",
     "crates/rdm-session",
@@ -46,3 +47,4 @@ libc = "0.2"
 rdm-common = { path = "crates/rdm-common" }
 rdm-panel-api = { path = "crates/rdm-panel-api" }
 libloading = "0.8"
+vte4 = "0.8"

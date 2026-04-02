@@ -2306,11 +2306,30 @@ fn plugin_search_paths() -> Vec<std::path::PathBuf> {
     }
     paths.push(std::path::PathBuf::from("/usr/local/lib/rdm/plugins"));
     paths.push(std::path::PathBuf::from("/usr/lib/rdm/plugins"));
+
+    if let Ok(cargo_target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        paths.push(std::path::PathBuf::from(&cargo_target_dir));
+        paths.push(std::path::PathBuf::from(&cargo_target_dir).join("debug"));
+        paths.push(std::path::PathBuf::from(&cargo_target_dir).join("release"));
+    }
+    paths.push(std::path::PathBuf::from("target/debug"));
+    paths.push(std::path::PathBuf::from("target/release"));
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
+            paths.push(dir.to_path_buf());
             paths.push(dir.join("rdm-plugins"));
+            paths.push(dir.join("deps"));
         }
     }
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        paths.push(current_dir);
+    }
+
+    paths.dedup();
+    log::debug!("settings plugin search paths: {:?}", paths);
+
     paths
 }
 
@@ -2330,14 +2349,21 @@ fn discover_plugins() -> Vec<DiscoveredPlugin> {
     let mut found = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for dir in plugin_search_paths() {
+        log::debug!("settings discovery scanning dir: {:?}", dir);
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
-            let Some(ext) = path.extension() else { continue };
-            if ext != "so" { continue; }
+            if let Some(ext) = path.extension() {
+                if ext != "so" {
+                    continue;
+                }
+            } else {
+                continue;
+            }
             let filename = path.file_name().unwrap_or_default().to_string_lossy();
             if let Some(name) = plugin_name_from_filename(&filename) {
                 if seen.insert(name.clone()) {
+                    log::debug!("settings discovered plugin {:?} at {:?}", name, path);
                     found.push(DiscoveredPlugin {
                         name,
                         _path: path.to_string_lossy().to_string(),
@@ -2386,17 +2412,21 @@ fn save_plugin_entries(rows: &[PluginRow]) {
             continue;
         }
 
-        // Skip active [[panel.plugins]] block
+        // Skip active [[panel.plugins]] block, including any [panel.plugins.config] sub-table.
+        // Do NOT break on empty lines — the [panel.plugins.config] section is separated from
+        // the name/position lines by a blank line, and leaving it behind produces invalid TOML.
         if trimmed == "[[panel.plugins]]" {
             i += 1;
             while i < lines.len() {
                 let lt = lines[i].trim();
-                if lt.is_empty() || lt.starts_with("[[") || (lt.starts_with('[') && !lt.starts_with("[panel.plugins")) {
+                // Stop only at a new array-of-tables header or a table header outside the
+                // panel.plugins namespace (e.g. [launcher]).  Empty lines and
+                // [panel.plugins.config] are consumed as part of the block.
+                if lt.starts_with("[[") || (lt.starts_with('[') && !lt.starts_with("[panel.plugins")) {
                     break;
                 }
                 i += 1;
             }
-            if i < lines.len() && lines[i].trim().is_empty() { i += 1; }
             continue;
         }
 
@@ -2512,18 +2542,16 @@ fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()
     zones_container.set_hexpand(true);
     zones_container.set_margin_bottom(8);
 
+    let disabled_container = Rc::new(GtkBox::new(Orientation::Vertical, 4));
+    disabled_container.set_hexpand(true);
+    disabled_container.set_margin_top(8);
+
     let status_label = Rc::new(Label::new(None));
     status_label.add_css_class("settings-hint");
     status_label.set_halign(gtk4::Align::Start);
     status_label.set_margin_top(8);
 
-    rebuild_layout_zones(&zones_container, &items_state, &status_label);
-    page.append(zones_container.as_ref());
-
-    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
-    btn_box.set_margin_top(12);
-    btn_box.set_halign(gtk4::Align::End);
-
+    // Define save_cb before rebuild_layout_zones so checkboxes can auto-save on toggle.
     let save_cb: Rc<dyn Fn()> = {
         let is = items_state.clone();
         let cfg = config.clone();
@@ -2533,6 +2561,20 @@ fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()
             save_layout_items(&items, &theme);
         })
     };
+
+    rebuild_layout_zones(
+        &zones_container,
+        &disabled_container,
+        &items_state,
+        &status_label,
+        &save_cb,
+    );
+    page.append(zones_container.as_ref());
+    page.append(disabled_container.as_ref());
+
+    let btn_box = GtkBox::new(Orientation::Horizontal, 8);
+    btn_box.set_margin_top(12);
+    btn_box.set_halign(gtk4::Align::End);
 
     let save_btn = Button::with_label("Save & Reload");
     save_btn.add_css_class("suggested-action");
@@ -2554,11 +2596,16 @@ fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()
 
 fn rebuild_layout_zones(
     container: &Rc<GtkBox>,
+    disabled_container: &Rc<GtkBox>,
     items_state: &Rc<RefCell<Vec<LayoutItem>>>,
     status_label: &Rc<Label>,
+    save_cb: &Rc<dyn Fn()>,
 ) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
+    }
+    while let Some(child) = disabled_container.first_child() {
+        disabled_container.remove(&child);
     }
 
     const ZONES: [&str; 3] = ["left", "center", "right"];
@@ -2622,10 +2669,13 @@ fn rebuild_layout_zones(
                 check.set_tooltip_text(Some("Uncheck to disable plugin"));
                 let is2 = items_state.clone();
                 let cont2 = container.clone();
+                let disabled2 = disabled_container.clone();
                 let sl2 = status_label.clone();
+                let scb2 = save_cb.clone();
                 check.connect_toggled(move |cb| {
                     is2.borrow_mut()[idx].enabled = cb.is_active();
-                    rebuild_layout_zones(&cont2, &is2, &sl2);
+                    rebuild_layout_zones(&cont2, &disabled2, &is2, &sl2, &scb2);
+                    scb2();
                 });
                 row_box.append(&check);
             }
@@ -2638,12 +2688,14 @@ fn rebuild_layout_zones(
                 let prev_idx = zone_items[zi_local - 1].0;
                 let is = items_state.clone();
                 let cont = container.clone();
+                let disabled = disabled_container.clone();
                 let sl = status_label.clone();
+                let scb = save_cb.clone();
                 up_btn.connect_clicked(move |_| {
                     let mut v = is.borrow_mut();
                     v.swap(idx, prev_idx);
                     drop(v);
-                    rebuild_layout_zones(&cont, &is, &sl);
+                    rebuild_layout_zones(&cont, &disabled, &is, &sl, &scb);
                 });
             }
             row_box.append(&up_btn);
@@ -2656,12 +2708,14 @@ fn rebuild_layout_zones(
                 let next_idx = zone_items[zi_local + 1].0;
                 let is = items_state.clone();
                 let cont = container.clone();
+                let disabled = disabled_container.clone();
                 let sl = status_label.clone();
+                let scb = save_cb.clone();
                 down_btn.connect_clicked(move |_| {
                     let mut v = is.borrow_mut();
                     v.swap(idx, next_idx);
                     drop(v);
-                    rebuild_layout_zones(&cont, &is, &sl);
+                    rebuild_layout_zones(&cont, &disabled, &is, &sl, &scb);
                 });
             }
             row_box.append(&down_btn);
@@ -2673,11 +2727,14 @@ fn rebuild_layout_zones(
             if zi > 0 {
                 let is = items_state.clone();
                 let cont = container.clone();
+                let disabled = disabled_container.clone();
                 let sl = status_label.clone();
+                let scb = save_cb.clone();
                 let target = ZONES[zi - 1].to_string();
                 left_btn.connect_clicked(move |_| {
                     is.borrow_mut()[idx].zone = target.clone();
-                    rebuild_layout_zones(&cont, &is, &sl);
+                    rebuild_layout_zones(&cont, &disabled, &is, &sl, &scb);
+                    scb();
                 });
             }
             row_box.append(&left_btn);
@@ -2689,11 +2746,14 @@ fn rebuild_layout_zones(
             if zi < 2 {
                 let is = items_state.clone();
                 let cont = container.clone();
+                let disabled = disabled_container.clone();
                 let sl = status_label.clone();
+                let scb = save_cb.clone();
                 let target = ZONES[zi + 1].to_string();
                 right_btn.connect_clicked(move |_| {
                     is.borrow_mut()[idx].zone = target.clone();
-                    rebuild_layout_zones(&cont, &is, &sl);
+                    rebuild_layout_zones(&cont, &disabled, &is, &sl, &scb);
+                    scb();
                 });
             }
             row_box.append(&right_btn);
@@ -2722,33 +2782,32 @@ fn rebuild_layout_zones(
         .collect();
 
     if !disabled.is_empty() {
-        if let Some(parent) = container.parent() {
-            if let Some(parent_box) = parent.downcast_ref::<GtkBox>() {
-                let dis_lbl = Label::new(Some("Disabled plugins:"));
-                dis_lbl.add_css_class("settings-hint");
-                dis_lbl.set_halign(gtk4::Align::Start);
-                dis_lbl.set_margin_top(8);
-                parent_box.append(&dis_lbl);
+        let dis_lbl = Label::new(Some("Disabled plugins:"));
+        dis_lbl.add_css_class("settings-hint");
+        dis_lbl.set_halign(gtk4::Align::Start);
+        dis_lbl.set_margin_top(8);
+        disabled_container.append(&dis_lbl);
 
-                let dis_row = GtkBox::new(Orientation::Horizontal, 8);
-                dis_row.set_margin_top(2);
+        let dis_row = GtkBox::new(Orientation::Horizontal, 8);
+        dis_row.set_margin_top(2);
 
-                for (idx, name) in disabled {
-                    let check = CheckButton::with_label(&name);
-                    check.set_active(false);
-                    check.set_tooltip_text(Some("Check to enable plugin"));
-                    let is2 = items_state.clone();
-                    let cont2 = container.clone();
-                    let sl2 = status_label.clone();
-                    check.connect_toggled(move |cb| {
-                        is2.borrow_mut()[idx].enabled = cb.is_active();
-                        rebuild_layout_zones(&cont2, &is2, &sl2);
-                    });
-                    dis_row.append(&check);
-                }
-                parent_box.append(&dis_row);
-            }
+        for (idx, name) in disabled {
+            let check = CheckButton::with_label(&name);
+            check.set_active(false);
+            check.set_tooltip_text(Some("Check to enable plugin"));
+            let is2 = items_state.clone();
+            let cont2 = container.clone();
+            let disabled2 = disabled_container.clone();
+            let sl2 = status_label.clone();
+            let scb2 = save_cb.clone();
+            check.connect_toggled(move |cb| {
+                is2.borrow_mut()[idx].enabled = cb.is_active();
+                rebuild_layout_zones(&cont2, &disabled2, &is2, &sl2, &scb2);
+                scb2();
+            });
+            dis_row.append(&check);
         }
+        disabled_container.append(&dis_row);
     }
 }
 

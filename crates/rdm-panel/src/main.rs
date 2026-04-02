@@ -57,11 +57,10 @@ fn main() {
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
-    // Load external plugins once before the GTK app starts.  We only load
-    // plugins whose names appear in the config so unused .so files are ignored.
-    let wanted: Vec<String> = config.panel.plugins.iter().map(|p| p.name.clone()).collect();
-    let wanted_opt = if wanted.is_empty() { None } else { Some(wanted.as_slice()) };
-    plugin_loader::load_plugins(wanted_opt);
+    // Load all discovered .so plugins upfront.  Widget instantiation is gated
+    // by the config entries below (line ~351), so loading extras costs nothing
+    // at runtime and lets rdm-settings enable plugins without a manual restart.
+    plugin_loader::load_plugins(None);
 
     let cfg = config.clone();
     app.connect_activate(move |app| build_panel(app, &cfg));

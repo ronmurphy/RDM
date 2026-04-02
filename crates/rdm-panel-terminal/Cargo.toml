@@ -1,0 +1,14 @@
+[package]
+name    = "rdm-panel-terminal"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name       = "rdm_panel_terminal"
+crate-type = ["cdylib"]
+
+[dependencies]
+rdm-panel-api = { workspace = true }
+gtk4          = { workspace = true }
+vte4          = { workspace = true }
+toml          = { workspace = true }
