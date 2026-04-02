@@ -2285,6 +2285,8 @@ struct PluginRow {
 #[derive(Clone, PartialEq, Debug)]
 enum LayoutItemKind {
     Builtin,
+    /// A builtin that can be hidden (e.g. clock — replaced by cmdcenter plugin).
+    HideableBuiltin,
     Plugin,
 }
 
@@ -2295,7 +2297,7 @@ struct LayoutItem {
     display: String,
     kind: LayoutItemKind,
     zone: String, // "left", "center", or "right"
-    enabled: bool, // builtins are always true; plugins can be toggled
+    enabled: bool, // always true for Builtin; togglable for HideableBuiltin and Plugin
 }
 
 /// Search paths for plugin .so files (mirrors rdm-panel's plugin_loader).
@@ -2508,7 +2510,7 @@ fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()
     let mut items: Vec<LayoutItem> = vec![
         LayoutItem { id: "launcher".to_string(),  display: "Launcher".to_string(),  kind: LayoutItemKind::Builtin, zone: layout.panel.launcher.clone(),  enabled: true },
         LayoutItem { id: "taskbar".to_string(),   display: "Taskbar".to_string(),   kind: LayoutItemKind::Builtin, zone: layout.panel.taskbar.clone(),   enabled: true },
-        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::Builtin, zone: layout.panel.clock.clone(),     enabled: true },
+        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::HideableBuiltin, zone: layout.panel.clock.clone(), enabled: config.borrow().panel.show_clock },
         LayoutItem { id: "sys_popup".to_string(), display: "Sys Popup".to_string(), kind: LayoutItemKind::Builtin, zone: layout.panel.sys_popup.clone(), enabled: true },
         LayoutItem { id: "tray".to_string(),      display: "Tray".to_string(),      kind: LayoutItemKind::Builtin, zone: layout.panel.tray.clone(),      enabled: true },
     ];
@@ -2558,7 +2560,7 @@ fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()
         Rc::new(move || {
             let items = is.borrow().clone();
             let theme = cfg.borrow().appearance.theme.clone();
-            save_layout_items(&items, &theme);
+            save_layout_items(&items, &theme, &cfg);
         })
     };
 
@@ -2661,8 +2663,9 @@ fn rebuild_layout_zones(
             name_lbl.set_hexpand(true);
             row_box.append(&name_lbl);
 
-            // Plugin items get a disable checkbox (builtins are always on)
-            let is_plugin = items[idx].kind == LayoutItemKind::Plugin;
+            // Plugin and HideableBuiltin items get a disable checkbox
+            let is_plugin = items[idx].kind == LayoutItemKind::Plugin
+                || items[idx].kind == LayoutItemKind::HideableBuiltin;
             if is_plugin {
                 let check = CheckButton::new();
                 check.set_active(true);
@@ -2774,15 +2777,20 @@ fn rebuild_layout_zones(
     // ── Disabled plugins row (below the three zone columns) ──
     // Rendered outside the horizontal zones_container by appending to its parent.
     // We access the parent GtkBox via container's parent widget.
+    // Show disabled plugins AND disabled hideable builtins (e.g. clock)
     let disabled: Vec<(usize, String)> = items
         .iter()
         .enumerate()
-        .filter(|(_, item)| item.kind == LayoutItemKind::Plugin && !item.enabled)
+        .filter(|(_, item)| {
+            !item.enabled
+                && (item.kind == LayoutItemKind::Plugin
+                    || item.kind == LayoutItemKind::HideableBuiltin)
+        })
         .map(|(idx, item)| (idx, item.display.clone()))
         .collect();
 
     if !disabled.is_empty() {
-        let dis_lbl = Label::new(Some("Disabled plugins:"));
+        let dis_lbl = Label::new(Some("Disabled:"));
         dis_lbl.add_css_class("settings-hint");
         dis_lbl.set_halign(gtk4::Align::Start);
         dis_lbl.set_margin_top(8);
@@ -2794,7 +2802,7 @@ fn rebuild_layout_zones(
         for (idx, name) in disabled {
             let check = CheckButton::with_label(&name);
             check.set_active(false);
-            check.set_tooltip_text(Some("Check to enable plugin"));
+            check.set_tooltip_text(Some("Check to enable"));
             let is2 = items_state.clone();
             let cont2 = container.clone();
             let disabled2 = disabled_container.clone();
@@ -2811,12 +2819,12 @@ fn rebuild_layout_zones(
     }
 }
 
-fn save_layout_items(items: &[LayoutItem], theme_name: &str) {
+fn save_layout_items(items: &[LayoutItem], theme_name: &str, config: &Rc<RefCell<RdmConfig>>) {
     // Reconstruct ThemeLayout from built-in item zones and Vec order
     let mut layout = rdm_common::theme::load_theme_layout_for(theme_name);
     let mut order: Vec<String> = Vec::new();
     for item in items {
-        if item.kind == LayoutItemKind::Builtin {
+        if item.kind == LayoutItemKind::Builtin || item.kind == LayoutItemKind::HideableBuiltin {
             match item.id.as_str() {
                 "launcher"  => layout.panel.launcher  = item.zone.clone(),
                 "taskbar"   => layout.panel.taskbar   = item.zone.clone(),
@@ -2831,6 +2839,14 @@ fn save_layout_items(items: &[LayoutItem], theme_name: &str) {
     layout.panel.order = order;
     if let Err(e) = rdm_common::theme::save_layout_for_theme(theme_name, &layout) {
         log::error!("Failed to save layout.toml: {}", e);
+    }
+
+    // Persist show_clock from the clock HideableBuiltin item
+    if let Some(clock_item) = items.iter().find(|i| i.id == "clock" && i.kind == LayoutItemKind::HideableBuiltin) {
+        config.borrow_mut().panel.show_clock = clock_item.enabled;
+        if let Err(e) = config.borrow().save() {
+            log::error!("Failed to save show_clock to rdm.toml: {}", e);
+        }
     }
 
     // Write plugin entries from LayoutItems directly (enabled + position)

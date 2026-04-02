@@ -10,13 +10,9 @@ use std::time::Duration;
 // ── Config ────────────────────────────────────────────────────────────────────
 
 struct Config {
-    /// strftime format shown on the panel button and in the popover header.
     time_format: String,
-    /// Second line in the popover header (date).
     date_format: String,
-    /// Whether to show the brightness slider (hide on desktops without backlight).
     show_brightness: bool,
-    /// Whether to show the Bluetooth row.
     show_bluetooth: bool,
 }
 
@@ -78,14 +74,12 @@ pub extern "C-unwind" fn rdm_plugin_new_instance(
     config_toml: *const std::ffi::c_char,
 ) -> *mut gtk4::ffi::GtkWidget {
     unsafe { gtk4::set_initialized(); }
-
     let cfg = if config_toml.is_null() {
         Config::default()
     } else {
         let s = unsafe { std::ffi::CStr::from_ptr(config_toml).to_str().ok() };
         Config::from_toml(s)
     };
-
     let button = build_widget(cfg);
     let raw = button.upcast_ref::<gtk4::Widget>().as_ptr();
     INSTANCES.with(|v| v.borrow_mut().push(CmdCenterPlugin { button }));
@@ -104,19 +98,16 @@ pub extern "C-unwind" fn rdm_plugin_exit() {
 
 // ── System helpers ────────────────────────────────────────────────────────────
 
-/// Read current volume 0–100. Returns None on failure.
 fn read_volume() -> Option<(f64, bool)> {
     let out = Command::new("wpctl")
         .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
-        .output()
-        .ok()?;
+        .output().ok()?;
     let txt = String::from_utf8(out.stdout).ok()?;
-    // "Volume: 0.75" or "Volume: 0.75 [MUTED]"
     let mut parts = txt.split_whitespace();
-    parts.next(); // "Volume:"
+    parts.next();
     let raw: f64 = parts.next()?.parse().ok()?;
     let muted = txt.contains("[MUTED]");
-    Some((raw * 100.0, muted))
+    Some(((raw * 100.0).clamp(0.0, 100.0), muted))
 }
 
 fn set_volume(pct: f64) {
@@ -131,18 +122,11 @@ fn toggle_mute() {
         .status();
 }
 
-/// Read brightness 0–100. Returns None if brightnessctl isn't available.
 fn read_brightness() -> Option<f64> {
-    let cur = Command::new("brightnessctl")
-        .arg("get")
-        .output()
-        .ok()?;
-    let max = Command::new("brightnessctl")
-        .arg("max")
-        .output()
-        .ok()?;
-    let cur: f64 = String::from_utf8(cur.stdout).ok()?.trim().parse().ok()?;
-    let max: f64 = String::from_utf8(max.stdout).ok()?.trim().parse().ok()?;
+    let cur_out = Command::new("brightnessctl").arg("get").output().ok()?;
+    let max_out = Command::new("brightnessctl").arg("max").output().ok()?;
+    let cur: f64 = String::from_utf8(cur_out.stdout).ok()?.trim().parse().ok()?;
+    let max: f64 = String::from_utf8(max_out.stdout).ok()?.trim().parse().ok()?;
     if max == 0.0 { return None; }
     Some((cur / max * 100.0).clamp(0.0, 100.0))
 }
@@ -153,18 +137,16 @@ fn set_brightness(pct: f64) {
         .status();
 }
 
-/// Returns (interface_name, connected) for the first non-loopback interface that is up.
 fn read_network() -> String {
     let Ok(entries) = std::fs::read_dir("/sys/class/net") else {
-        return "Network: unknown".to_owned();
+        return "  Unknown".to_owned();
     };
     for entry in entries.flatten() {
         let iface = entry.file_name().to_string_lossy().to_string();
         if iface == "lo" { continue; }
-        let state_path = entry.path().join("operstate");
-        let state = std::fs::read_to_string(state_path).unwrap_or_default();
+        let state = std::fs::read_to_string(entry.path().join("operstate"))
+            .unwrap_or_default();
         if state.trim() == "up" {
-            // Try to get SSID for wireless interfaces
             if let Ok(out) = Command::new("iwgetid").args([&iface, "-r"]).output() {
                 let ssid = String::from_utf8_lossy(&out.stdout).trim().to_owned();
                 if !ssid.is_empty() {
@@ -177,13 +159,12 @@ fn read_network() -> String {
     "  Not connected".to_owned()
 }
 
-/// Returns true if bluetooth adapter is powered on.
 fn read_bluetooth() -> bool {
     let Ok(out) = Command::new("bluetoothctl").arg("show").output() else {
         return false;
     };
-    let txt = String::from_utf8_lossy(&out.stdout);
-    txt.lines()
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
         .find(|l| l.trim().starts_with("Powered:"))
         .map(|l| l.contains("yes"))
         .unwrap_or(false)
@@ -195,6 +176,53 @@ fn set_bluetooth(on: bool) {
         .status();
 }
 
+// ── Small layout helpers ──────────────────────────────────────────────────────
+
+/// A card-style section box matching .cmdcenter-section CSS.
+fn section_box() -> gtk4::Box {
+    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    b.add_css_class("cmdcenter-section");
+    b
+}
+
+/// A row label (small muted caps header above a control).
+fn row_label(text: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(text));
+    l.add_css_class("cmdcenter-row-label");
+    l.set_halign(gtk4::Align::Start);
+    l
+}
+
+/// A horizontal slider row: [icon] [Scale] [pct label] [optional button]
+fn slider_row(icon: &str, value: f64, extra: Option<gtk4::Widget>)
+    -> (gtk4::Box, gtk4::Scale, gtk4::Label)
+{
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+
+    let icon_lbl = gtk4::Label::new(Some(icon));
+    icon_lbl.set_width_chars(2);
+    row.append(&icon_lbl);
+
+    let scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, None::<&gtk4::Adjustment>);
+    scale.set_range(0.0, 100.0);
+    scale.set_value(value);
+    scale.set_hexpand(true);
+    scale.set_draw_value(false);
+    scale.set_increments(1.0, 5.0);
+    row.append(&scale);
+
+    let pct = gtk4::Label::new(Some(&format!("{:3.0}%", value)));
+    pct.set_width_chars(5);
+    pct.set_xalign(1.0);
+    row.append(&pct);
+
+    if let Some(w) = extra {
+        row.append(&w);
+    }
+
+    (row, scale, pct)
+}
+
 // ── Widget builder ────────────────────────────────────────────────────────────
 
 fn build_widget(cfg: Config) -> gtk4::MenuButton {
@@ -203,367 +231,361 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
     btn.add_css_class("tray-btn");
     btn.add_css_class("task-popup-btn");
 
-    // ── Popover shell ──────────────────────────────────────────────────────
+    // ── Popover ────────────────────────────────────────────────────────────
     let pop = gtk4::Popover::new();
     pop.set_has_arrow(false);
+    pop.add_css_class("cmdcenter-popover");
 
-    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
     root.set_size_request(320, -1);
-    root.set_margin_top(12);
-    root.set_margin_bottom(12);
-    root.set_margin_start(16);
-    root.set_margin_end(16);
+    root.set_margin_top(8);
+    root.set_margin_bottom(8);
+    root.set_margin_start(8);
+    root.set_margin_end(8);
 
-    // ── Clock header ───────────────────────────────────────────────────────
-    let time_lbl = gtk4::Label::new(Some(&Local::now().format(&cfg.time_format).to_string()));
-    time_lbl.add_css_class("task-popup-title");
+    // ── Header: time + date ────────────────────────────────────────────────
+    let time_lbl = gtk4::Label::new(None);
+    time_lbl.add_css_class("cmdcenter-time");
     time_lbl.set_halign(gtk4::Align::Center);
-    // Make the time large
     time_lbl.set_markup(&format!(
         "<span size='xx-large' weight='bold'>{}</span>",
         Local::now().format(&cfg.time_format)
     ));
 
     let date_lbl = gtk4::Label::new(Some(&Local::now().format(&cfg.date_format).to_string()));
-    date_lbl.add_css_class("settings-hint");
+    date_lbl.add_css_class("cmdcenter-date");
     date_lbl.set_halign(gtk4::Align::Center);
-    date_lbl.set_margin_bottom(10);
 
     root.append(&time_lbl);
     root.append(&date_lbl);
-    root.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
 
-    // ── Volume row ─────────────────────────────────────────────────────────
-    let vol_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    vol_box.set_margin_top(10);
-    vol_box.set_margin_bottom(4);
+    // ── Calendar ──────────────────────────────────────────────────────────
+    let cal_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    cal_box.add_css_class("cmdcenter-section");
+    cal_box.add_css_class("cmdcenter-calendar");
+    let calendar = gtk4::Calendar::new();
+    cal_box.append(&calendar);
+    root.append(&cal_box);
 
-    let vol_icon = gtk4::Label::new(Some("🔊"));
-    vol_icon.set_width_chars(2);
-    vol_box.append(&vol_icon);
-
-    let vol_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, None::<&gtk4::Adjustment>);
-    vol_scale.set_range(0.0, 100.0);
-    vol_scale.set_value(50.0);
-    vol_scale.set_hexpand(true);
-    vol_scale.set_draw_value(false);
-    vol_scale.set_increments(1.0, 5.0);
-    vol_box.append(&vol_scale);
-
-    let vol_pct = gtk4::Label::new(Some(" 50%"));
-    vol_pct.set_width_chars(5);
-    vol_pct.set_xalign(1.0);
-    vol_box.append(&vol_pct);
+    // ── Volume section ────────────────────────────────────────────────────
+    let vol_section = section_box();
+    vol_section.append(&row_label("VOLUME"));
 
     let mute_btn = gtk4::Button::with_label("🔇");
     mute_btn.add_css_class("tray-btn");
     mute_btn.set_tooltip_text(Some("Toggle mute"));
-    vol_box.append(&mute_btn);
 
-    root.append(&vol_box);
+    let (vol_row, vol_scale, vol_pct) =
+        slider_row("🔊", 50.0, Some(mute_btn.clone().upcast()));
+    vol_section.append(&vol_row);
+    root.append(&vol_section);
 
-    // ── Brightness row (hidden if brightnessctl not available) ─────────────
-    let bright_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    bright_box.set_margin_top(4);
-    bright_box.set_margin_bottom(4);
-    bright_box.set_visible(cfg.show_brightness);
+    // ── Brightness section (hidden if brightnessctl unavailable) ──────────
+    let bright_section = section_box();
+    bright_section.append(&row_label("BRIGHTNESS"));
+    bright_section.set_visible(cfg.show_brightness);
 
-    let bright_icon = gtk4::Label::new(Some("☀"));
-    bright_icon.set_width_chars(2);
-    bright_box.append(&bright_icon);
+    let (bright_row, bright_scale, bright_pct) =
+        slider_row("☀", 100.0, None);
+    bright_section.append(&bright_row);
+    root.append(&bright_section);
 
-    let bright_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, None::<&gtk4::Adjustment>);
-    bright_scale.set_range(0.0, 100.0);
-    bright_scale.set_value(100.0);
-    bright_scale.set_hexpand(true);
-    bright_scale.set_draw_value(false);
-    bright_scale.set_increments(1.0, 5.0);
-    bright_box.append(&bright_scale);
-
-    let bright_pct = gtk4::Label::new(Some("100%"));
-    bright_pct.set_width_chars(5);
-    bright_pct.set_xalign(1.0);
-    bright_box.append(&bright_pct);
-
-    root.append(&bright_box);
-
-    root.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
-
-    // ── Network + Bluetooth row ────────────────────────────────────────────
-    let status_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    status_box.set_margin_top(10);
-    status_box.set_margin_bottom(10);
+    // ── Network + Bluetooth section ───────────────────────────────────────
+    let status_section = section_box();
 
     let net_lbl = gtk4::Label::new(Some("  Checking…"));
     net_lbl.set_halign(gtk4::Align::Start);
     net_lbl.add_css_class("settings-hint");
-    status_box.append(&net_lbl);
+    status_section.append(&net_lbl);
 
-    let bt_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let bt_lbl = gtk4::Label::new(Some("  Bluetooth"));
-    bt_lbl.set_halign(gtk4::Align::Start);
-    bt_lbl.set_hexpand(true);
-    let bt_btn = gtk4::Button::with_label("Off");
-    bt_btn.add_css_class("tray-btn");
-    bt_btn.set_tooltip_text(Some("Toggle Bluetooth"));
-
-    bt_box.append(&bt_lbl);
     if cfg.show_bluetooth {
-        bt_box.append(&bt_btn);
+        let bt_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        let bt_lbl = gtk4::Label::new(Some("  Bluetooth"));
+        bt_lbl.set_halign(gtk4::Align::Start);
+        bt_lbl.set_hexpand(true);
+        let bt_btn = gtk4::Button::with_label("Off");
+        bt_btn.add_css_class("tray-btn");
+        bt_btn.set_tooltip_text(Some("Toggle Bluetooth"));
+        bt_row.append(&bt_lbl);
+        bt_row.append(&bt_btn);
+        status_section.append(&bt_row);
+
+        // Bluetooth toggle callback
+        let bt_state = Rc::new(Cell::new(false));
+        let bt_state2 = bt_state.clone();
+        let bb2 = bt_btn.clone();
+        bt_btn.connect_clicked(move |_| {
+            let new_state = !bt_state2.get();
+            bt_state2.set(new_state);
+            set_bluetooth(new_state);
+            bb2.set_label(if new_state { "On" } else { "Off" });
+        });
+
+        // Store bt_state and bt_btn for refresh — via weak refs in the open callback below
+        let bt_state_outer = bt_state.clone();
+        let bt_btn_outer = bt_btn.clone();
+
+        // We need these in the connect_notify_local below; store them for capture
+        // by saving them as locals that the closure can move over
+        build_open_callback(
+            &btn, &pop,
+            &vol_scale, &vol_pct, &vol_section,
+            &bright_scale, &bright_pct, &bright_section,
+            &net_lbl,
+            Some((bt_state_outer, bt_btn_outer)),
+        );
+    } else {
+        build_open_callback(
+            &btn, &pop,
+            &vol_scale, &vol_pct, &vol_section,
+            &bright_scale, &bright_pct, &bright_section,
+            &net_lbl,
+            None,
+        );
     }
-    status_box.append(&bt_box);
 
-    root.append(&status_box);
+    root.append(&status_section);
 
-    root.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+    // ── Power buttons section ──────────────────────────────────────────────
+    let power_section = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    power_section.set_homogeneous(true);
+    power_section.set_margin_top(4);
 
-    // ── Power buttons ──────────────────────────────────────────────────────
-    let power_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    power_box.set_margin_top(10);
-    power_box.set_homogeneous(true);
-
-    let lock_btn     = gtk4::Button::with_label("🔒 Lock");
-    let logout_btn   = gtk4::Button::with_label("⏏ Logout");
-    let shutdown_btn = gtk4::Button::with_label("⏻ Shutdown");
-    let reboot_btn   = gtk4::Button::with_label("↺ Reboot");
-
-    lock_btn.add_css_class("tray-btn");
-    logout_btn.add_css_class("tray-btn");
-    shutdown_btn.add_css_class("destructive-action");
-    reboot_btn.add_css_class("tray-btn");
-
-    power_box.append(&lock_btn);
-    power_box.append(&logout_btn);
-    power_box.append(&shutdown_btn);
-    power_box.append(&reboot_btn);
-
-    root.append(&power_box);
+    for (label, is_destructive, action) in [
+        ("🔒 Lock",      false, "lock"),
+        ("⏏ Logout",    false, "logout"),
+        ("⏻ Shutdown",  true,  "shutdown"),
+        ("↺ Reboot",    false, "reboot"),
+    ] {
+        let b = gtk4::Button::with_label(label);
+        b.add_css_class("cmdcenter-power-btn");
+        if is_destructive { b.add_css_class("destructive-action"); }
+        let pop_w = pop.downgrade();
+        let action = action.to_owned();
+        b.connect_clicked(move |_| {
+            if let Some(p) = pop_w.upgrade() { p.popdown(); }
+            run_power_action(&action);
+        });
+        power_section.append(&b);
+    }
+    root.append(&power_section);
 
     pop.set_child(Some(&root));
     btn.set_popover(Some(&pop));
 
-    // ── Always-running clock tick (updates button label + popover header) ──
+    // ── Always-running clock tick ──────────────────────────────────────────
     let btn_weak   = btn.downgrade();
     let time_lbl_w = time_lbl.downgrade();
     let date_lbl_w = date_lbl.downgrade();
     let tfmt = cfg.time_format.clone();
     let dfmt = cfg.date_format.clone();
-
     glib::timeout_add_seconds_local(1, move || {
-        let (Some(btn), Some(tlbl), Some(dlbl)) = (
+        let (Some(b), Some(tl), Some(dl)) = (
             btn_weak.upgrade(), time_lbl_w.upgrade(), date_lbl_w.upgrade()
         ) else {
             return glib::ControlFlow::Break;
         };
         let now = Local::now();
-        btn.set_label(&now.format(&tfmt).to_string());
-        tlbl.set_markup(&format!(
+        b.set_label(&now.format(&tfmt).to_string());
+        tl.set_markup(&format!(
             "<span size='xx-large' weight='bold'>{}</span>",
             now.format(&tfmt)
         ));
-        dlbl.set_text(&now.format(&dfmt).to_string());
+        dl.set_text(&now.format(&dfmt).to_string());
         glib::ControlFlow::Continue
     });
 
-    // ── State shared across callbacks ──────────────────────────────────────
-    let vol_updating  = Rc::new(Cell::new(false));
-    let brg_updating  = Rc::new(Cell::new(false));
-    let vol_pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-    let brg_pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-    let bt_state      = Rc::new(Cell::new(false));
-    let refresh_timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-
-    // ── Volume slider change ───────────────────────────────────────────────
+    // ── Volume callbacks ───────────────────────────────────────────────────
+    // Use a shared target cell + single-timer flag instead of SourceId::remove()
+    // (glib-rs 0.20 panics when removing an already-fired source).
+    let vol_updating = Rc::new(Cell::new(false));
+    let vol_target   = Rc::new(Cell::new(50.0f64));
+    let vol_armed    = Rc::new(Cell::new(false));
     {
         let vu  = vol_updating.clone();
         let vp  = vol_pct.clone();
-        let vi  = vol_icon.clone();
-        let pnd = vol_pending.clone();
+        let vt  = vol_target.clone();
+        let arm = vol_armed.clone();
         vol_scale.connect_value_changed(move |s| {
             if vu.get() { return; }
             let pct = s.value();
             vp.set_text(&format!("{:3.0}%", pct));
-            vi.set_text(if pct == 0.0 { "🔈" } else if pct <= 50.0 { "🔉" } else { "🔊" });
-            // Debounce: cancel any pending command and schedule a new one
-            if let Some(id) = pnd.borrow_mut().take() { id.remove(); }
-            let id = glib::timeout_add_local_once(Duration::from_millis(80), move || {
-                set_volume(pct);
-            });
-            *pnd.borrow_mut() = Some(id);
+            vt.set(pct);
+            if !arm.get() {
+                arm.set(true);
+                let vt2  = vt.clone();
+                let arm2 = arm.clone();
+                glib::timeout_add_local_once(Duration::from_millis(80), move || {
+                    let final_pct = vt2.get();
+                    arm2.set(false);
+                    std::thread::spawn(move || { set_volume(final_pct); });
+                });
+            }
         });
     }
-
-    // ── Mute button ────────────────────────────────────────────────────────
     {
-        let vs  = vol_scale.clone();
-        let vi  = vol_icon.clone();
-        let vp  = vol_pct.clone();
-        let vu  = vol_updating.clone();
+        let vs2 = vol_scale.clone();
+        let vp2 = vol_pct.clone();
+        let vu2 = vol_updating.clone();
         mute_btn.connect_clicked(move |_| {
-            toggle_mute();
-            // Re-read after short delay so wpctl state has settled
-            let vs2 = vs.clone();
-            let vi2 = vi.clone();
-            let vp2 = vp.clone();
-            let vu2 = vu.clone();
-            glib::timeout_add_local_once(Duration::from_millis(120), move || {
-                if let Some((pct, muted)) = read_volume() {
-                    vu2.set(true);
-                    vs2.set_value(pct);
-                    vp2.set_text(&format!("{:3.0}%", pct));
-                    vi2.set_text(if muted { "🔇" } else if pct <= 50.0 { "🔉" } else { "🔊" });
-                    vu2.set(false);
-                }
+            std::thread::spawn(|| { toggle_mute(); });
+            let vs3 = vs2.clone();
+            let vp3 = vp2.clone();
+            let vu3 = vu2.clone();
+            // Re-read volume after mute settles
+            glib::timeout_add_local_once(Duration::from_millis(150), move || {
+                let (tx, rx) = async_channel::bounded::<(f64, bool)>(1);
+                std::thread::spawn(move || {
+                    let _ = tx.send_blocking(read_volume().unwrap_or((0.0, false)));
+                });
+                glib::spawn_future_local(async move {
+                    if let Ok((pct, _)) = rx.recv().await {
+                        vu3.set(true);
+                        vs3.set_value(pct);
+                        vp3.set_text(&format!("{:3.0}%", pct));
+                        vu3.set(false);
+                    }
+                });
             });
         });
     }
 
-    // ── Brightness slider change ───────────────────────────────────────────
+    // ── Brightness callbacks ───────────────────────────────────────────────
+    let brg_updating = Rc::new(Cell::new(false));
+    let brg_target   = Rc::new(Cell::new(100.0f64));
+    let brg_armed    = Rc::new(Cell::new(false));
     {
         let bu  = brg_updating.clone();
         let bp  = bright_pct.clone();
-        let pnd = brg_pending.clone();
+        let bt  = brg_target.clone();
+        let arm = brg_armed.clone();
         bright_scale.connect_value_changed(move |s| {
             if bu.get() { return; }
             let pct = s.value();
             bp.set_text(&format!("{:3.0}%", pct));
-            if let Some(id) = pnd.borrow_mut().take() { id.remove(); }
-            let id = glib::timeout_add_local_once(Duration::from_millis(80), move || {
-                set_brightness(pct);
-            });
-            *pnd.borrow_mut() = Some(id);
-        });
-    }
-
-    // ── Bluetooth button ───────────────────────────────────────────────────
-    {
-        let bt  = bt_state.clone();
-        let bb  = bt_btn.clone();
-        bt_btn.connect_clicked(move |_| {
-            let new_state = !bt.get();
-            bt.set(new_state);
-            set_bluetooth(new_state);
-            bb.set_label(if new_state { "On" } else { "Off" });
-        });
-    }
-
-    // ── Power actions ──────────────────────────────────────────────────────
-    {
-        let pop_w = pop.downgrade();
-        lock_btn.connect_clicked(move |_| {
-            if let Some(p) = pop_w.upgrade() { p.popdown(); }
-            let _ = Command::new("swaylock").args(["-f", "-c", "1a1b26"]).spawn();
-        });
-    }
-    {
-        let pop_w = pop.downgrade();
-        logout_btn.connect_clicked(move |_| {
-            if let Some(p) = pop_w.upgrade() { p.popdown(); }
-            let _ = Command::new("pkill").arg("labwc").spawn();
-        });
-    }
-    {
-        let pop_w = pop.downgrade();
-        shutdown_btn.connect_clicked(move |_| {
-            if let Some(p) = pop_w.upgrade() { p.popdown(); }
-            let _ = Command::new("systemctl").arg("poweroff").spawn();
-        });
-    }
-    {
-        let pop_w = pop.downgrade();
-        reboot_btn.connect_clicked(move |_| {
-            if let Some(p) = pop_w.upgrade() { p.popdown(); }
-            let _ = Command::new("systemctl").arg("reboot").spawn();
-        });
-    }
-
-    // ── Refresh on popover open ────────────────────────────────────────────
-    {
-        let vs   = vol_scale.clone();
-        let vp   = vol_pct.clone();
-        let vi   = vol_icon.clone();
-        let vu   = vol_updating.clone();
-        let bs   = bright_scale.clone();
-        let bp   = bright_pct.clone();
-        let bu   = brg_updating.clone();
-        let bb   = bright_box.clone();
-        let nl   = net_lbl.clone();
-        let btb  = bt_btn.clone();
-        let bts  = bt_state.clone();
-        let rtmr = refresh_timer.clone();
-
-        btn.connect_notify_local(Some("active"), move |b, _| {
-            // Popover closed — cancel refresh timer
-            if !b.is_active() {
-                if let Some(id) = rtmr.borrow_mut().take() { id.remove(); }
-                return;
-            }
-
-            // Read volume
-            if let Some((pct, muted)) = read_volume() {
-                vu.set(true);
-                vs.set_value(pct);
-                vp.set_text(&format!("{:3.0}%", pct));
-                vi.set_text(if muted { "🔇" } else if pct <= 50.0 { "🔉" } else { "🔊" });
-                vu.set(false);
-            }
-
-            // Read brightness — hide row if unavailable
-            if let Some(pct) = read_brightness() {
-                bu.set(true);
-                bs.set_value(pct);
-                bp.set_text(&format!("{:3.0}%", pct));
-                bu.set(false);
-                bb.set_visible(true);
-            } else {
-                bb.set_visible(false);
-            }
-
-            // Read network + bluetooth in a background thread to avoid blocking
-            let nl2   = nl.clone();
-            let btb2  = btb.clone();
-            let bts2  = bts.clone();
-            let (tx, rx) = async_channel::bounded::<(String, bool)>(1);
-            std::thread::spawn(move || {
-                let net = read_network();
-                let bt  = read_bluetooth();
-                let _ = tx.send_blocking((net, bt));
-            });
-            glib::spawn_future_local(async move {
-                if let Ok((net, bt)) = rx.recv().await {
-                    nl2.set_text(&net);
-                    bts2.set(bt);
-                    btb2.set_label(if bt { "On" } else { "Off" });
-                }
-            });
-
-            // Refresh network/bt every 10 seconds while open
-            let b_weak = b.downgrade();
-            let nl3    = nl.clone();
-            let btb3   = btb.clone();
-            let bts3   = bts.clone();
-            let id = glib::timeout_add_seconds_local(10, move || {
-                let Some(btn) = b_weak.upgrade() else { return glib::ControlFlow::Break; };
-                if !btn.is_active() { return glib::ControlFlow::Break; }
-                let nl4   = nl3.clone();
-                let btb4  = btb3.clone();
-                let bts4  = bts3.clone();
-                let (tx2, rx2) = async_channel::bounded::<(String, bool)>(1);
-                std::thread::spawn(move || {
-                    let _ = tx2.send_blocking((read_network(), read_bluetooth()));
+            bt.set(pct);
+            if !arm.get() {
+                arm.set(true);
+                let bt2  = bt.clone();
+                let arm2 = arm.clone();
+                glib::timeout_add_local_once(Duration::from_millis(80), move || {
+                    let final_pct = bt2.get();
+                    arm2.set(false);
+                    std::thread::spawn(move || { set_brightness(final_pct); });
                 });
-                glib::spawn_future_local(async move {
-                    if let Ok((net, bt)) = rx2.recv().await {
-                        nl4.set_text(&net);
-                        bts4.set(bt);
-                        btb4.set_label(if bt { "On" } else { "Off" });
-                    }
-                });
-                glib::ControlFlow::Continue
-            });
-            *rtmr.borrow_mut() = Some(id);
+            }
         });
     }
 
     btn
+}
+
+// ── Popover open/close refresh callback ──────────────────────────────────────
+
+fn build_open_callback(
+    btn: &gtk4::MenuButton,
+    _pop: &gtk4::Popover,
+    vol_scale: &gtk4::Scale,
+    vol_pct: &gtk4::Label,
+    vol_section: &gtk4::Box,
+    bright_scale: &gtk4::Scale,
+    bright_pct: &gtk4::Label,
+    bright_section: &gtk4::Box,
+    net_lbl: &gtk4::Label,
+    bt: Option<(Rc<Cell<bool>>, gtk4::Button)>,
+) {
+    let vol_updating = Rc::new(Cell::new(false));
+    let brg_updating = Rc::new(Cell::new(false));
+    let refresh_timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+    let vs  = vol_scale.clone();
+    let vp  = vol_pct.clone();
+    let vs_box = vol_section.clone();
+    let vu  = vol_updating;
+    let bs  = bright_scale.clone();
+    let bp  = bright_pct.clone();
+    let bs_box = bright_section.clone();
+    let bu  = brg_updating;
+    let nl  = net_lbl.clone();
+    let rtmr = refresh_timer;
+
+    btn.connect_notify_local(Some("active"), move |b, _| {
+        if !b.is_active() {
+            if let Some(id) = rtmr.borrow_mut().take() { id.remove(); }
+            return;
+        }
+
+        // Volume
+        if let Some((pct, _muted)) = read_volume() {
+            vu.set(true);
+            vs.set_value(pct);
+            vp.set_text(&format!("{:3.0}%", pct));
+            vu.set(false);
+            vs_box.set_visible(true);
+        }
+
+        // Brightness
+        if let Some(pct) = read_brightness() {
+            bu.set(true);
+            bs.set_value(pct);
+            bp.set_text(&format!("{:3.0}%", pct));
+            bu.set(false);
+            bs_box.set_visible(true);
+        } else {
+            bs_box.set_visible(false);
+        }
+
+        // Network + Bluetooth in background thread
+        let nl2 = nl.clone();
+        let bt2 = bt.clone().map(|(s, b)| (s, b));
+        let (tx, rx) = async_channel::bounded::<(String, bool)>(1);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking((read_network(), read_bluetooth()));
+        });
+        glib::spawn_future_local(async move {
+            if let Ok((net, bt_on)) = rx.recv().await {
+                nl2.set_text(&net);
+                if let Some((state, btn)) = bt2 {
+                    state.set(bt_on);
+                    btn.set_label(if bt_on { "On" } else { "Off" });
+                }
+            }
+        });
+
+        // Refresh every 10s while open
+        let b_weak = b.downgrade();
+        let nl3 = nl.clone();
+        let bt3 = bt.clone();
+        let id = glib::timeout_add_seconds_local(10, move || {
+            let Some(btn) = b_weak.upgrade() else { return glib::ControlFlow::Break; };
+            if !btn.is_active() { return glib::ControlFlow::Break; }
+            let nl4 = nl3.clone();
+            let bt4 = bt3.clone();
+            let (tx2, rx2) = async_channel::bounded::<(String, bool)>(1);
+            std::thread::spawn(move || {
+                let _ = tx2.send_blocking((read_network(), read_bluetooth()));
+            });
+            glib::spawn_future_local(async move {
+                if let Ok((net, bt_on)) = rx2.recv().await {
+                    nl4.set_text(&net);
+                    if let Some((state, btn)) = bt4 {
+                        state.set(bt_on);
+                        btn.set_label(if bt_on { "On" } else { "Off" });
+                    }
+                }
+            });
+            glib::ControlFlow::Continue
+        });
+        *rtmr.borrow_mut() = Some(id);
+    });
+}
+
+fn run_power_action(action: &str) {
+    match action {
+        "lock"     => { let _ = Command::new("swaylock").args(["-f", "-c", "1a1b26"]).spawn(); }
+        "logout"   => { let _ = Command::new("pkill").arg("labwc").spawn(); }
+        "shutdown" => { let _ = Command::new("systemctl").arg("poweroff").spawn(); }
+        "reboot"   => { let _ = Command::new("systemctl").arg("reboot").spawn(); }
+        _ => {}
+    }
 }

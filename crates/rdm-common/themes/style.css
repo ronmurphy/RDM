@@ -1051,3 +1051,95 @@ window.rdm-dock {
     background-color: @theme_surface;
     border-radius: 4px;
 }
+
+/* ── Command Center Plugin ─────────────────────────────────────── */
+
+/* Popover shell — wider radius to feel like a panel extension */
+.cmdcenter-popover contents {
+    background-color: @theme_bg;
+    color: @theme_fg;
+    border: 1px solid @theme_border;
+    border-radius: 14px;
+    padding: 4px;
+}
+
+/* Each card section (volume, brightness, network+bt) */
+.cmdcenter-section {
+    background-color: @theme_surface;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+/* Row label inside a section */
+.cmdcenter-row-label {
+    font-size: 11px;
+    color: @theme_muted;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+}
+
+/* Large time in the header */
+.cmdcenter-time {
+    font-size: 32px;
+    font-weight: bold;
+    color: @theme_fg;
+    margin-top: 4px;
+    margin-bottom: 2px;
+}
+
+/* Date subtitle */
+.cmdcenter-date {
+    font-size: 12px;
+    color: @theme_muted;
+    margin-bottom: 8px;
+}
+
+/* Power buttons row */
+.cmdcenter-power-btn {
+    border-radius: 8px;
+    padding: 8px 4px;
+    min-height: 0;
+    font-size: 11px;
+    background-color: @theme_surface;
+    color: @theme_fg;
+    border: 1px solid @theme_border;
+}
+
+.cmdcenter-power-btn:hover {
+    background-color: @theme_bg;
+    border-color: @theme_accent;
+    color: @theme_accent;
+}
+
+/* Shutdown is highlighted destructive */
+.cmdcenter-power-btn.destructive-action {
+    background-color: alpha(@theme_red, 0.15);
+    border-color: @theme_red;
+    color: @theme_red;
+}
+
+.cmdcenter-power-btn.destructive-action:hover {
+    background-color: @theme_red;
+    color: @theme_bg;
+}
+
+/* Calendar inside cmdcenter */
+.cmdcenter-calendar calendar {
+    background-color: transparent;
+    color: @theme_fg;
+    border: none;
+}
+
+.cmdcenter-calendar calendar:selected {
+    background-color: @theme_accent;
+    color: @theme_bg;
+    border-radius: 4px;
+}
+
+.cmdcenter-calendar calendar.header {
+    background-color: transparent;
+    color: @theme_fg;
+    font-weight: bold;
+}
