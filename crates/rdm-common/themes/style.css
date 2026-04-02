@@ -1143,3 +1143,35 @@ window.rdm-dock {
     color: @theme_fg;
     font-weight: bold;
 }
+
+/* Compact 2-col tile layout */
+.cmdcenter-tile {
+    min-width: 120px;
+}
+
+/* Large icon in BT/WiFi tiles */
+.cmdcenter-tile-icon {
+    font-size: 20px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+/* Clickable tiles (WiFi, Calendar bar) get hover + pointer cursor */
+.cmdcenter-tile-clickable {
+    cursor: pointer;
+}
+
+.cmdcenter-tile-clickable:hover {
+    background-color: alpha(@theme_accent, 0.1);
+    border: 1px solid alpha(@theme_accent, 0.3);
+}
+
+/* WiFi network list rows */
+.cmdcenter-wifi-list row {
+    border-radius: 6px;
+    padding: 2px 4px;
+}
+
+.cmdcenter-wifi-list row:hover {
+    background-color: alpha(@theme_accent, 0.1);
+}

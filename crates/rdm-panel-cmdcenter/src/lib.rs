@@ -96,7 +96,7 @@ pub extern "C-unwind" fn rdm_plugin_exit() {
     INSTANCES.with(|v| v.borrow_mut().clear());
 }
 
-// ── WiFi helpers (ported from rdm-panel wifi.rs) ──────────────────────────────
+// ── WiFi helpers ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 struct WifiNetwork {
@@ -111,18 +111,16 @@ fn scan_networks() -> Vec<WifiNetwork> {
         .args(["-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE", "dev", "wifi", "list"])
         .output()
     else { return Vec::new(); };
-
     let stdout = String::from_utf8_lossy(&out.stdout);
     let mut seen = std::collections::HashSet::new();
     let mut networks = Vec::new();
-
     for line in stdout.lines() {
         let parts: Vec<&str> = line.rsplitn(4, ':').collect();
         if parts.len() < 4 { continue; }
-        let in_use    = parts[0].trim() == "*";
-        let security  = parts[1].trim().to_string();
+        let in_use   = parts[0].trim() == "*";
+        let security = parts[1].trim().to_string();
         let signal: u8 = parts[2].trim().parse().unwrap_or(0);
-        let ssid      = parts[3].trim().to_string();
+        let ssid     = parts[3].trim().to_string();
         if ssid.is_empty() || !seen.insert(ssid.clone()) { continue; }
         networks.push(WifiNetwork { ssid, signal, security, in_use });
     }
@@ -164,93 +162,70 @@ fn signal_icon(signal: u8, in_use: bool) -> &'static str {
     }
 }
 
-/// Show a password entry window and connect on submit.
 fn show_password_dialog(ssid: String, result_lbl: gtk4::Label) {
     let win = gtk4::Window::builder()
         .title(format!("Connect to {}", ssid))
         .default_width(340)
         .resizable(false)
         .build();
-
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    vbox.set_margin_top(16);
-    vbox.set_margin_bottom(16);
-    vbox.set_margin_start(16);
-    vbox.set_margin_end(16);
-
+    vbox.set_margin_top(16); vbox.set_margin_bottom(16);
+    vbox.set_margin_start(16); vbox.set_margin_end(16);
     let lbl = gtk4::Label::new(Some(&format!("Password for \"{}\"", ssid)));
     vbox.append(&lbl);
-
     let entry = gtk4::PasswordEntry::new();
     entry.set_show_peek_icon(true);
     entry.set_placeholder_text(Some("WiFi password"));
     vbox.append(&entry);
-
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
-    let cancel = gtk4::Button::with_label("Cancel");
+    let cancel  = gtk4::Button::with_label("Cancel");
     let connect = gtk4::Button::with_label("Connect");
     connect.add_css_class("suggested-action");
     btn_row.append(&cancel);
     btn_row.append(&connect);
     vbox.append(&btn_row);
-
     let err_lbl = gtk4::Label::new(None);
     err_lbl.add_css_class("wifi-error");
     err_lbl.set_visible(false);
     vbox.append(&err_lbl);
-
     win.set_child(Some(&vbox));
-
     let win_c = win.clone();
     cancel.connect_clicked(move |_| win_c.close());
-
-    let win_c2    = win.clone();
-    let entry_c   = entry.clone();
-    let err_c     = err_lbl.clone();
-    let ssid_c    = ssid.clone();
-    let res_c     = result_lbl.clone();
+    let win_c2  = win.clone();
+    let entry_c = entry.clone();
+    let err_c   = err_lbl.clone();
+    let ssid_c  = ssid.clone();
+    let res_c   = result_lbl.clone();
     let do_connect = move || {
         let password = entry_c.text().to_string();
         if password.is_empty() { return; }
-        let ssid2  = ssid_c.clone();
-        let pw2    = password.clone();
-        let win3   = win_c2.clone();
-        let err3   = err_c.clone();
-        let res3   = res_c.clone();
+        let ssid_thread = ssid_c.clone();
+        let ssid_msg    = ssid_c.clone();
+        let pw2  = password.clone();
+        let win3 = win_c2.clone();
+        let err3 = err_c.clone();
+        let res3 = res_c.clone();
         let (tx, rx) = async_channel::bounded::<Result<(), String>>(1);
-        let ssid_thread = ssid2.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send_blocking(connect_new(&ssid_thread, &pw2));
-        });
+        std::thread::spawn(move || { let _ = tx.send_blocking(connect_new(&ssid_thread, &pw2)); });
         glib::spawn_future_local(async move {
             match rx.recv().await {
-                Ok(Ok(())) => {
-                    res3.set_text(&format!("  Connected  ({})", ssid2));
-                    win3.close();
-                }
-                Ok(Err(e)) => {
-                    err3.set_text(&format!("Failed: {}", e));
-                    err3.set_visible(true);
-                }
+                Ok(Ok(())) => { res3.set_text(&format!("  {} (connected)", ssid_msg)); win3.close(); }
+                Ok(Err(e)) => { err3.set_text(&format!("Failed: {}", e)); err3.set_visible(true); }
                 Err(_) => { win3.close(); }
             }
         });
     };
-
     let do_connect_c = do_connect.clone();
     connect.connect_clicked(move |_| do_connect_c());
     entry.connect_activate(move |_| do_connect());
-
     win.present();
 }
 
-// ── Volume / brightness helpers ───────────────────────────────────────────────
+// ── Volume / brightness / bluetooth helpers ───────────────────────────────────
 
 fn read_volume() -> Option<(f64, bool)> {
-    let out = Command::new("wpctl")
-        .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
-        .output().ok()?;
+    let out = Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output().ok()?;
     let txt = String::from_utf8(out.stdout).ok()?;
     let mut parts = txt.split_whitespace();
     parts.next();
@@ -265,9 +240,7 @@ fn set_volume(pct: f64) {
 }
 
 fn toggle_mute() {
-    let _ = Command::new("wpctl")
-        .args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
-        .status();
+    let _ = Command::new("wpctl").args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]).status();
 }
 
 fn read_brightness() -> Option<f64> {
@@ -311,6 +284,14 @@ fn section_box() -> gtk4::Box {
     b
 }
 
+fn compact_tile() -> gtk4::Box {
+    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    b.add_css_class("cmdcenter-section");
+    b.add_css_class("cmdcenter-tile");
+    b.set_hexpand(true);
+    b
+}
+
 fn row_label(text: &str) -> gtk4::Label {
     let l = gtk4::Label::new(Some(text));
     l.add_css_class("cmdcenter-row-label");
@@ -318,37 +299,15 @@ fn row_label(text: &str) -> gtk4::Label {
     l
 }
 
-fn slider_row(icon: &str, value: f64, extra: Option<gtk4::Widget>)
-    -> (gtk4::Box, gtk4::Scale, gtk4::Label)
-{
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let icon_lbl = gtk4::Label::new(Some(icon));
-    icon_lbl.set_width_chars(2);
-    row.append(&icon_lbl);
-    let scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, None::<&gtk4::Adjustment>);
-    scale.set_range(0.0, 100.0);
-    scale.set_value(value);
-    scale.set_hexpand(true);
-    scale.set_draw_value(false);
-    scale.set_increments(1.0, 5.0);
-    row.append(&scale);
-    let pct = gtk4::Label::new(Some(&format!("{:3.0}%", value)));
-    pct.set_width_chars(5);
-    pct.set_xalign(1.0);
-    row.append(&pct);
-    if let Some(w) = extra { row.append(&w); }
-    (row, scale, pct)
-}
+// ── WiFi expandable section ───────────────────────────────────────────────────
+// Returns (section_box, status_label, rescan_fn)
+// The caller decides when to first scan (deferred until user opens it).
 
-// ── WiFi section widget ───────────────────────────────────────────────────────
-
-/// Builds the WiFi card section. Returns the section box and a status label
-/// that shows the current connection (updated on connect).
-fn build_wifi_section() -> (gtk4::Box, gtk4::Label) {
+fn build_wifi_list() -> (gtk4::Box, gtk4::Label, Rc<dyn Fn()>) {
     let section = section_box();
 
     let header_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let header_lbl = row_label("WI-FI");
+    let header_lbl = row_label("WI-FI NETWORKS");
     header_lbl.set_hexpand(true);
     let scan_btn = gtk4::Button::with_label("↺");
     scan_btn.add_css_class("tray-btn");
@@ -357,13 +316,11 @@ fn build_wifi_section() -> (gtk4::Box, gtk4::Label) {
     header_row.append(&scan_btn);
     section.append(&header_row);
 
-    // Current connection status
-    let status_lbl = gtk4::Label::new(Some("  Checking…"));
+    let status_lbl = gtk4::Label::new(Some("  Tap ↺ to scan"));
     status_lbl.set_halign(gtk4::Align::Start);
     status_lbl.add_css_class("settings-hint");
     section.append(&status_lbl);
 
-    // Scrollable network list (max ~5 visible rows)
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
     list.add_css_class("cmdcenter-wifi-list");
@@ -375,83 +332,60 @@ fn build_wifi_section() -> (gtk4::Box, gtk4::Label) {
     scroll.set_child(Some(&list));
     section.append(&scroll);
 
-    // Scanning state label (shown while scan is in progress)
     let scanning_lbl = gtk4::Label::new(Some("  Scanning…"));
     scanning_lbl.add_css_class("settings-hint");
     scanning_lbl.set_halign(gtk4::Align::Start);
     scanning_lbl.set_visible(false);
     section.append(&scanning_lbl);
 
-    // ── Populate the list ──────────────────────────────────────────────────
-    let do_scan = {
-        let list_c      = list.clone();
-        let scanning_c  = scanning_lbl.clone();
-        let status_c    = status_lbl.clone();
+    let do_scan: Rc<dyn Fn()> = {
+        let list_c     = list.clone();
+        let scanning_c = scanning_lbl.clone();
+        let status_c   = status_lbl.clone();
         Rc::new(move || {
-            // Clear existing rows
-            while let Some(row) = list_c.first_child() {
-                list_c.remove(&row);
-            }
+            while let Some(row) = list_c.first_child() { list_c.remove(&row); }
             scanning_c.set_visible(true);
-
             let list2     = list_c.clone();
             let scanning2 = scanning_c.clone();
             let status2   = status_c.clone();
             let (tx, rx) = async_channel::bounded::<Vec<WifiNetwork>>(1);
-            std::thread::spawn(move || {
-                let _ = tx.send_blocking(scan_networks());
-            });
+            std::thread::spawn(move || { let _ = tx.send_blocking(scan_networks()); });
             glib::spawn_future_local(async move {
                 let networks = rx.recv().await.unwrap_or_default();
                 scanning2.set_visible(false);
-
-                // Update current status line
                 if let Some(active) = networks.iter().find(|n| n.in_use) {
                     status2.set_text(&format!("  {} (connected)", active.ssid));
                 } else {
                     status2.set_text("  Not connected");
                 }
-
-                // Populate rows
                 for net in networks.iter().take(12) {
                     let row_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-                    row_box.set_margin_top(4);
-                    row_box.set_margin_bottom(4);
-                    row_box.set_margin_start(4);
-                    row_box.set_margin_end(4);
-
+                    row_box.set_margin_top(4); row_box.set_margin_bottom(4);
+                    row_box.set_margin_start(4); row_box.set_margin_end(4);
                     let icon = gtk4::Label::new(Some(signal_icon(net.signal, net.in_use)));
                     icon.set_width_chars(2);
                     row_box.append(&icon);
-
                     let name = gtk4::Label::new(Some(&net.ssid));
                     name.set_hexpand(true);
                     name.set_halign(gtk4::Align::Start);
                     name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                    name.set_max_width_chars(24);
+                    name.set_max_width_chars(22);
                     row_box.append(&name);
-
-                    // Lock icon for secured networks
                     if net.security.contains("WPA") || net.security.contains("WEP") {
                         let lock = gtk4::Label::new(Some("󰌾"));
                         lock.add_css_class("settings-hint");
                         row_box.append(&lock);
                     }
-
-                    // Signal bar
                     let sig_lbl = gtk4::Label::new(Some(&format!("{}%", net.signal)));
                     sig_lbl.add_css_class("settings-hint");
                     sig_lbl.set_width_chars(4);
                     sig_lbl.set_xalign(1.0);
                     row_box.append(&sig_lbl);
-
                     let row = gtk4::ListBoxRow::new();
                     row.set_child(Some(&row_box));
-
-                    // Clicking a row connects
-                    let ssid_c    = net.ssid.clone();
-                    let status3   = status2.clone();
-                    let gesture   = gtk4::GestureClick::new();
+                    let ssid_c  = net.ssid.clone();
+                    let status3 = status2.clone();
+                    let gesture = gtk4::GestureClick::new();
                     gesture.connect_released(move |g, _, _, _| {
                         g.set_state(gtk4::EventSequenceState::Claimed);
                         let ssid2   = ssid_c.clone();
@@ -460,17 +394,11 @@ fn build_wifi_section() -> (gtk4::Box, gtk4::Label) {
                             let ssid3   = ssid2.clone();
                             let status5 = status4.clone();
                             let (tx2, rx2) = async_channel::bounded::<Result<(), String>>(1);
-                            std::thread::spawn(move || {
-                                let _ = tx2.send_blocking(connect_known(&ssid3));
-                            });
+                            std::thread::spawn(move || { let _ = tx2.send_blocking(connect_known(&ssid3)); });
                             glib::spawn_future_local(async move {
                                 match rx2.recv().await {
-                                    Ok(Ok(())) => {
-                                        status5.set_text(&format!("  {} (connected)", ssid2));
-                                    }
-                                    Ok(Err(e)) => {
-                                        status5.set_text(&format!("  Failed: {}", e));
-                                    }
+                                    Ok(Ok(())) => { status5.set_text(&format!("  {} (connected)", ssid2)); }
+                                    Ok(Err(e)) => { status5.set_text(&format!("  Failed: {}", e)); }
                                     Err(_) => {}
                                 }
                             });
@@ -485,16 +413,12 @@ fn build_wifi_section() -> (gtk4::Box, gtk4::Label) {
         })
     };
 
-    // Scan button triggers a rescan
     {
         let scan_c = do_scan.clone();
         scan_btn.connect_clicked(move |_| scan_c());
     }
 
-    // Initial scan
-    do_scan();
-
-    (section, status_lbl)
+    (section, status_lbl, do_scan)
 }
 
 // ── Main widget builder ───────────────────────────────────────────────────────
@@ -509,14 +433,12 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
     pop.set_has_arrow(false);
     pop.add_css_class("cmdcenter-popover");
 
-    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    root.set_size_request(320, -1);
-    root.set_margin_top(8);
-    root.set_margin_bottom(8);
-    root.set_margin_start(8);
-    root.set_margin_end(8);
+    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    root.set_size_request(340, -1);
+    root.set_margin_top(8); root.set_margin_bottom(8);
+    root.set_margin_start(8); root.set_margin_end(8);
 
-    // ── Header: time + date ────────────────────────────────────────────────
+    // ── Time / Date header ────────────────────────────────────────────────────
     let time_lbl = gtk4::Label::new(None);
     time_lbl.add_css_class("cmdcenter-time");
     time_lbl.set_halign(gtk4::Align::Center);
@@ -530,89 +452,169 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
     root.append(&time_lbl);
     root.append(&date_lbl);
 
-    // ── Calendar ──────────────────────────────────────────────────────────
-    let cal_box = section_box();
-    cal_box.add_css_class("cmdcenter-calendar");
-    cal_box.append(&gtk4::Calendar::new());
-    root.append(&cal_box);
+    // ── Row 1: Volume tile | Brightness tile ──────────────────────────────────
+    let row1 = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
 
-    // ── Volume section ────────────────────────────────────────────────────
-    let vol_section = section_box();
-    vol_section.append(&row_label("VOLUME"));
+    // — Volume tile —
+    let vol_tile = compact_tile();
+    let vol_hdr = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    let vol_icon_lbl = gtk4::Label::new(Some("🔊"));
+    let vol_title = row_label("VOLUME");
+    vol_title.set_hexpand(true);
     let mute_btn = gtk4::Button::with_label("🔇");
     mute_btn.add_css_class("tray-btn");
     mute_btn.set_tooltip_text(Some("Toggle mute"));
-    let (_, vol_scale, vol_pct) = slider_row("🔊", 50.0, Some(mute_btn.clone().upcast()));
-    vol_section.append(&{
-        // re-build the row since slider_row consumed the extra widget
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        let icon = gtk4::Label::new(Some("🔊"));
-        icon.set_width_chars(2);
-        row.append(&icon);
-        row.append(&vol_scale);
-        let p = vol_pct.clone();
-        row.append(&p);
-        row.append(&mute_btn);
-        row
-    });
-    root.append(&vol_section);
+    vol_hdr.append(&vol_icon_lbl);
+    vol_hdr.append(&vol_title);
+    vol_hdr.append(&mute_btn);
+    vol_tile.append(&vol_hdr);
+    let vol_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, None::<&gtk4::Adjustment>);
+    vol_scale.set_range(0.0, 100.0);
+    vol_scale.set_value(50.0);
+    vol_scale.set_hexpand(true);
+    vol_scale.set_draw_value(false);
+    vol_scale.set_increments(1.0, 5.0);
+    let vol_pct = gtk4::Label::new(Some(" 50%"));
+    vol_pct.set_width_chars(4);
+    vol_pct.set_xalign(1.0);
+    let vol_slider_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    vol_slider_row.append(&vol_scale);
+    vol_slider_row.append(&vol_pct);
+    vol_tile.append(&vol_slider_row);
+    row1.append(&vol_tile);
 
-    // ── Brightness section ────────────────────────────────────────────────
-    let bright_section = section_box();
-    bright_section.append(&row_label("BRIGHTNESS"));
-    bright_section.set_visible(cfg.show_brightness);
-    let (bright_row, bright_scale, bright_pct) = slider_row("☀", 100.0, None);
-    bright_section.append(&bright_row);
-    root.append(&bright_section);
+    // — Brightness tile —
+    let brg_tile = compact_tile();
+    brg_tile.set_visible(cfg.show_brightness);
+    let brg_hdr = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    let brg_icon_lbl = gtk4::Label::new(Some("☀"));
+    let brg_title = row_label("BRIGHTNESS");
+    brg_title.set_hexpand(true);
+    brg_hdr.append(&brg_icon_lbl);
+    brg_hdr.append(&brg_title);
+    brg_tile.append(&brg_hdr);
+    let bright_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, None::<&gtk4::Adjustment>);
+    bright_scale.set_range(0.0, 100.0);
+    bright_scale.set_value(100.0);
+    bright_scale.set_hexpand(true);
+    bright_scale.set_draw_value(false);
+    bright_scale.set_increments(1.0, 5.0);
+    let bright_pct = gtk4::Label::new(Some("100%"));
+    bright_pct.set_width_chars(4);
+    bright_pct.set_xalign(1.0);
+    let brg_slider_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    brg_slider_row.append(&bright_scale);
+    brg_slider_row.append(&bright_pct);
+    brg_tile.append(&brg_slider_row);
+    row1.append(&brg_tile);
+    root.append(&row1);
 
-    // ── WiFi section ──────────────────────────────────────────────────────
-    let (wifi_section, _wifi_status) = build_wifi_section();
-    root.append(&wifi_section);
+    // ── Row 2: Bluetooth tile | WiFi tile ──────────────────────────────────────
+    let row2 = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
 
-    // ── Bluetooth row ─────────────────────────────────────────────────────
-    let bt_section = section_box();
-    let bt_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let bt_lbl = gtk4::Label::new(Some("  Bluetooth"));
-    bt_lbl.set_halign(gtk4::Align::Start);
-    bt_lbl.set_hexpand(true);
-    bt_row.append(&bt_lbl);
-    let bt_state = Rc::new(Cell::new(false));
-    if cfg.show_bluetooth {
-        let bt_btn = gtk4::Button::with_label("Off");
-        bt_btn.add_css_class("tray-btn");
-        bt_row.append(&bt_btn);
-        let bs2 = bt_state.clone();
-        let bb2 = bt_btn.clone();
-        bt_btn.connect_clicked(move |_| {
-            let new = !bs2.get();
-            bs2.set(new);
-            std::thread::spawn(move || set_bluetooth(new));
-            bb2.set_label(if new { "On" } else { "Off" });
+    // — Bluetooth tile —
+    let bt_tile = compact_tile();
+    if !cfg.show_bluetooth { bt_tile.set_visible(false); }
+    let bt_icon = gtk4::Label::new(Some("󰂯"));
+    bt_icon.set_halign(gtk4::Align::Center);
+    bt_icon.add_css_class("cmdcenter-tile-icon");
+    let bt_label = row_label("BLUETOOTH");
+    bt_label.set_halign(gtk4::Align::Center);
+    let bt_state  = Rc::new(Cell::new(false));
+    let bt_switch = gtk4::Switch::new();
+    bt_switch.set_halign(gtk4::Align::Center);
+    bt_switch.set_active(false);
+    bt_tile.append(&bt_icon);
+    bt_tile.append(&bt_label);
+    bt_tile.append(&bt_switch);
+    row2.append(&bt_tile);
+
+    // — WiFi tile (tap to reveal network list) —
+    let wifi_tile = compact_tile();
+    wifi_tile.add_css_class("cmdcenter-tile-clickable");
+    let wifi_icon = gtk4::Label::new(Some("󰖩"));
+    wifi_icon.set_halign(gtk4::Align::Center);
+    wifi_icon.add_css_class("cmdcenter-tile-icon");
+    let wifi_label = row_label("WI-FI");
+    wifi_label.set_halign(gtk4::Align::Center);
+    let wifi_chevron = gtk4::Label::new(Some("▸"));
+    wifi_chevron.add_css_class("cmdcenter-row-label");
+    wifi_chevron.set_halign(gtk4::Align::Center);
+    wifi_tile.append(&wifi_icon);
+    wifi_tile.append(&wifi_label);
+    wifi_tile.append(&wifi_chevron);
+    row2.append(&wifi_tile);
+    root.append(&row2);
+
+    // ── WiFi revealer (lazy scan on first open) ────────────────────────────────
+    let wifi_revealer = gtk4::Revealer::new();
+    wifi_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+    wifi_revealer.set_transition_duration(200);
+    wifi_revealer.set_reveal_child(false);
+    let (wifi_section, _wifi_status, wifi_scan) = build_wifi_list();
+    wifi_revealer.set_child(Some(&wifi_section));
+    root.append(&wifi_revealer);
+
+    {
+        let rev          = wifi_revealer.clone();
+        let chev         = wifi_chevron.clone();
+        let scan         = wifi_scan.clone();
+        let scanned_once = Rc::new(Cell::new(false));
+        let gesture      = gtk4::GestureClick::new();
+        gesture.connect_released(move |g, _, _, _| {
+            g.set_state(gtk4::EventSequenceState::Claimed);
+            let showing = !rev.reveals_child();
+            rev.set_reveal_child(showing);
+            chev.set_text(if showing { "▾" } else { "▸" });
+            if showing && !scanned_once.get() {
+                scanned_once.set(true);
+                scan();
+            }
         });
-        // Store for popover-open refresh
-        let bs3 = bt_state.clone();
-        let bb3 = bt_btn.clone();
-        btn.connect_notify_local(Some("active"), move |b, _| {
-            if !b.is_active() { return; }
-            let bs4 = bs3.clone();
-            let bb4 = bb3.clone();
-            let (tx, rx) = async_channel::bounded::<bool>(1);
-            std::thread::spawn(move || { let _ = tx.send_blocking(read_bluetooth()); });
-            glib::spawn_future_local(async move {
-                if let Ok(on) = rx.recv().await {
-                    bs4.set(on);
-                    bb4.set_label(if on { "On" } else { "Off" });
-                }
-            });
-        });
+        wifi_tile.add_controller(gesture);
     }
-    bt_section.append(&bt_row);
-    root.append(&bt_section);
 
-    // ── Power buttons ──────────────────────────────────────────────────────
-    let power_section = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    power_section.set_homogeneous(true);
-    power_section.set_margin_top(4);
+    // ── Calendar expander ──────────────────────────────────────────────────────
+    let cal_bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    cal_bar.add_css_class("cmdcenter-section");
+    cal_bar.add_css_class("cmdcenter-tile-clickable");
+    let cal_bar_lbl = gtk4::Label::new(Some("📅  Calendar"));
+    cal_bar_lbl.add_css_class("cmdcenter-row-label");
+    cal_bar_lbl.set_hexpand(true);
+    cal_bar_lbl.set_halign(gtk4::Align::Start);
+    let cal_chevron = gtk4::Label::new(Some("▸"));
+    cal_chevron.add_css_class("cmdcenter-row-label");
+    cal_bar.append(&cal_bar_lbl);
+    cal_bar.append(&cal_chevron);
+    root.append(&cal_bar);
+
+    let cal_revealer = gtk4::Revealer::new();
+    cal_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+    cal_revealer.set_transition_duration(200);
+    cal_revealer.set_reveal_child(false);
+    let cal_inner = section_box();
+    cal_inner.add_css_class("cmdcenter-calendar");
+    cal_inner.append(&gtk4::Calendar::new());
+    cal_revealer.set_child(Some(&cal_inner));
+    root.append(&cal_revealer);
+
+    {
+        let rev  = cal_revealer.clone();
+        let chev = cal_chevron.clone();
+        let gesture = gtk4::GestureClick::new();
+        gesture.connect_released(move |g, _, _, _| {
+            g.set_state(gtk4::EventSequenceState::Claimed);
+            let showing = !rev.reveals_child();
+            rev.set_reveal_child(showing);
+            chev.set_text(if showing { "▾" } else { "▸" });
+        });
+        cal_bar.add_controller(gesture);
+    }
+
+    // ── Power buttons ──────────────────────────────────────────────────────────
+    let power_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    power_row.set_homogeneous(true);
+    power_row.set_margin_top(2);
     for (label, destructive, action) in [
         ("🔒 Lock",     false, "lock"),
         ("⏏ Logout",   false, "logout"),
@@ -628,14 +630,14 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
             if let Some(p) = pop_w.upgrade() { p.popdown(); }
             run_power_action(&action);
         });
-        power_section.append(&b);
+        power_row.append(&b);
     }
-    root.append(&power_section);
+    root.append(&power_row);
 
     pop.set_child(Some(&root));
     btn.set_popover(Some(&pop));
 
-    // ── Clock tick ─────────────────────────────────────────────────────────
+    // ── Clock tick (WeakRef — stops when button is dropped) ───────────────────
     let btn_weak   = btn.downgrade();
     let time_lbl_w = time_lbl.downgrade();
     let date_lbl_w = date_lbl.downgrade();
@@ -652,15 +654,13 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
         glib::ControlFlow::Continue
     });
 
-    // ── Volume slider (safe debounce — no SourceId::remove) ───────────────
+    // ── Volume safe debounce (no SourceId::remove) ────────────────────────────
     let vol_updating = Rc::new(Cell::new(false));
     let vol_target   = Rc::new(Cell::new(50.0f64));
     let vol_armed    = Rc::new(Cell::new(false));
     {
-        let vu  = vol_updating.clone();
-        let vp  = vol_pct.clone();
-        let vt  = vol_target.clone();
-        let arm = vol_armed.clone();
+        let vu = vol_updating.clone(); let vp = vol_pct.clone();
+        let vt = vol_target.clone();   let arm = vol_armed.clone();
         vol_scale.connect_value_changed(move |s| {
             if vu.get() { return; }
             let pct = s.value();
@@ -676,53 +676,40 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
             }
         });
     }
+    // Mute button
     {
-        let vs2 = vol_scale.clone();
-        let vp2 = vol_pct.clone();
-        let vu2 = vol_updating.clone();
+        let vs = vol_scale.clone(); let vp = vol_pct.clone(); let vu = vol_updating.clone();
         mute_btn.connect_clicked(move |_| {
             std::thread::spawn(toggle_mute);
-            let vs3 = vs2.clone(); let vp3 = vp2.clone(); let vu3 = vu2.clone();
+            let vs2 = vs.clone(); let vp2 = vp.clone(); let vu2 = vu.clone();
             glib::timeout_add_local_once(Duration::from_millis(150), move || {
                 let (tx, rx) = async_channel::bounded::<(f64, bool)>(1);
                 std::thread::spawn(move || { let _ = tx.send_blocking(read_volume().unwrap_or((0.0, false))); });
                 glib::spawn_future_local(async move {
                     if let Ok((pct, _)) = rx.recv().await {
-                        vu3.set(true); vs3.set_value(pct); vp3.set_text(&format!("{:3.0}%", pct)); vu3.set(false);
+                        vu2.set(true); vs2.set_value(pct); vp2.set_text(&format!("{:3.0}%", pct)); vu2.set(false);
                     }
                 });
             });
         });
     }
 
-    // ── Brightness slider (created before popover-open so we share the Rc) ──
-    let brg_updating = Rc::new(Cell::new(false));
-
-    // ── Volume refresh on popover open ────────────────────────────────────
-    {
-        let vs  = vol_scale.clone();
-        let vp  = vol_pct.clone();
-        let vu  = vol_updating.clone();
-        let bs  = bright_scale.clone();
-        let bp  = bright_pct.clone();
-        let bu  = brg_updating.clone();
-        let bsec = bright_section.clone();
-        btn.connect_notify_local(Some("active"), move |b, _| {
-            if !b.is_active() { return; }
-            // Volume
-            if let Some((pct, _)) = read_volume() {
-                vu.set(true); vs.set_value(pct); vp.set_text(&format!("{:3.0}%", pct)); vu.set(false);
-            }
-            // Brightness
-            if let Some(pct) = read_brightness() {
-                bu.set(true); bs.set_value(pct); bp.set_text(&format!("{:3.0}%", pct)); bu.set(false);
-                bsec.set_visible(true);
-            } else {
-                bsec.set_visible(false);
-            }
+    // ── Bluetooth switch ──────────────────────────────────────────────────────
+    let bt_updating = Rc::new(Cell::new(false));
+    if cfg.show_bluetooth {
+        let bs = bt_state.clone();
+        let bu = bt_updating.clone();
+        bt_switch.connect_active_notify(move |sw| {
+            if bu.get() { return; }
+            let new = sw.is_active();
+            if bs.get() == new { return; }
+            bs.set(new);
+            std::thread::spawn(move || set_bluetooth(new));
         });
     }
 
+    // ── Brightness safe debounce (Rc shared with popover-open handler) ────────
+    let brg_updating = Rc::new(Cell::new(false));
     let brg_target   = Rc::new(Cell::new(100.0f64));
     let brg_armed    = Rc::new(Cell::new(false));
     {
@@ -739,6 +726,44 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
                     std::thread::spawn(move || set_brightness(p));
                 });
             }
+        });
+    }
+
+    // ── Popover-open: refresh volume, brightness, bluetooth ───────────────────
+    {
+        let vs = vol_scale.clone();    let vp = vol_pct.clone();    let vu = vol_updating.clone();
+        let bs = bright_scale.clone(); let bp = bright_pct.clone(); let bu = brg_updating.clone();
+        let bsec   = brg_tile.clone();
+        let bt_sw  = bt_switch.clone();
+        let bt_upd = bt_updating.clone();
+        let bt_st  = bt_state.clone();
+        btn.connect_notify_local(Some("active"), move |b, _| {
+            if !b.is_active() { return; }
+            // Volume
+            if let Some((pct, _)) = read_volume() {
+                vu.set(true); vs.set_value(pct); vp.set_text(&format!("{:3.0}%", pct)); vu.set(false);
+            }
+            // Brightness
+            if let Some(pct) = read_brightness() {
+                bu.set(true); bs.set_value(pct); bp.set_text(&format!("{:3.0}%", pct)); bu.set(false);
+                bsec.set_visible(true);
+            } else {
+                bsec.set_visible(false);
+            }
+            // Bluetooth (async to not block main thread)
+            let bt_sw2  = bt_sw.clone();
+            let bt_upd2 = bt_upd.clone();
+            let bt_st2  = bt_st.clone();
+            let (tx, rx) = async_channel::bounded::<bool>(1);
+            std::thread::spawn(move || { let _ = tx.send_blocking(read_bluetooth()); });
+            glib::spawn_future_local(async move {
+                if let Ok(on) = rx.recv().await {
+                    bt_upd2.set(true);
+                    bt_sw2.set_active(on);
+                    bt_st2.set(on);
+                    bt_upd2.set(false);
+                }
+            });
         });
     }
 
