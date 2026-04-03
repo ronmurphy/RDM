@@ -194,6 +194,19 @@ else
     ok "Updated labwc rc.xml (previous saved as rc.xml.bak)"
 fi
 
+# ─── Copy labwc autostart ──────────────────────────────────────
+
+if [ ! -f "$LABWC_DIR/autostart" ]; then
+    cp config/labwc-autostart "$LABWC_DIR/autostart"
+    chmod +x "$LABWC_DIR/autostart"
+    ok "Copied labwc-autostart → $LABWC_DIR/autostart"
+else
+    cp "$LABWC_DIR/autostart" "$LABWC_DIR/autostart.bak"
+    cp config/labwc-autostart "$LABWC_DIR/autostart"
+    chmod +x "$LABWC_DIR/autostart"
+    ok "Updated labwc autostart (previous saved as autostart.bak)"
+fi
+
 # ─── Install portal config ─────────────────────────────────────
 
 PORTAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal"
@@ -213,8 +226,9 @@ info "Installing default configs to $PREFIX/share/rdm/..."
 sudo mkdir -p "$PREFIX/share/rdm"
 sudo install -Dm644 config/rdm.toml       "$PREFIX/share/rdm/rdm.toml"
 sudo install -Dm644 config/session.toml    "$PREFIX/share/rdm/session.toml"
-sudo install -Dm644 config/labwc-rc.xml    "$PREFIX/share/rdm/labwc-rc.xml"
-sudo install -Dm644 config/rdm-portals.conf "$PREFIX/share/rdm/rdm-portals.conf"
+sudo install -Dm644 config/labwc-rc.xml      "$PREFIX/share/rdm/labwc-rc.xml"
+sudo install -Dm755 config/labwc-autostart   "$PREFIX/share/rdm/labwc-autostart"
+sudo install -Dm644 config/rdm-portals.conf  "$PREFIX/share/rdm/rdm-portals.conf"
 
 ok "Default configs → $PREFIX/share/rdm/"
 

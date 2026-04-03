@@ -1,0 +1,22 @@
+#!/bin/sh
+# RDM autostart — managed by rdm-start
+# Only launch rdm-session when running as the RDM desktop environment
+if [ "$RDM_SESSION" != "1" ]; then
+    exit 0
+fi
+LOG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/rdm.log"
+# Kill any zombie rdm-session from a previous incomplete logout, then start fresh
+if pgrep -x rdm-session >/dev/null 2>&1; then
+    pkill -x rdm-session 2>/dev/null || true
+    sleep 0.5
+fi
+rdm-session >> "$LOG_FILE" 2>&1 &
+
+# Inhibit screen blanking while audio is playing.
+# rdm-idle-inhibit detects active sink-inputs via pactl and resets the idle
+# timer every 30 s using wlrctl.  It is also managed by rdm-session (which
+# will restart it if it crashes), but starting it here ensures it runs even
+# on a bare labwc session without rdm-session.
+if command -v rdm-idle-inhibit >/dev/null 2>&1; then
+    rdm-idle-inhibit &
+fi
