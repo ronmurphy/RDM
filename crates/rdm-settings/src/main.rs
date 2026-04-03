@@ -2848,7 +2848,7 @@ fn save_layout_items(items: &[LayoutItem], theme_name: &str, config: &Rc<RefCell
         dirty = true;
     }
     if let Some(item) = items.iter().find(|i| i.id == "tray" && i.kind == LayoutItemKind::HideableBuiltin) {
-        config.borrow_mut().panel.show_tray = item.enabled;
+        config.borrow_mut().panel.show_battery_session = item.enabled;
         dirty = true;
     }
     if let Some(item) = items.iter().find(|i| i.id == "sys_popup" && i.kind == LayoutItemKind::HideableBuiltin) {
