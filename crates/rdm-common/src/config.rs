@@ -41,6 +41,10 @@ pub struct PanelConfig {
     #[serde(default = "default_true")]
     pub show_clock: bool,
     #[serde(default = "default_true")]
+    pub show_battery_session: bool,
+    #[serde(default = "default_true")]
+    pub show_sys_popup: bool,
+    #[serde(default = "default_true")]
     pub show_workspaces: bool,
     #[serde(default = "default_clock_format")]
     pub clock_format: String,
@@ -238,6 +242,8 @@ impl Default for PanelConfig {
             height: default_panel_height(),
             position: default_position(),
             show_clock: true,
+            show_battery_session: true,
+            show_sys_popup: true,
             show_workspaces: true,
             clock_format: default_clock_format(),
             taskbar_mode: default_taskbar_mode(),

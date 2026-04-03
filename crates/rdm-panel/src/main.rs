@@ -321,11 +321,13 @@ fn build_panel_window(
 
     // Right: unified tray area — SNI app icons on the left, battery/power on the right.
     let sni_tray = sni::setup_sni_tray();
-    let tray = tray::setup_tray(app, mode);
     let tray_area = gtk4::Box::new(Orientation::Horizontal, 0);
     tray_area.add_css_class("tray-area");
     tray_area.append(&sni_tray);
-    tray_area.append(&tray);
+    if config.panel.show_battery_session {
+        let tray = tray::setup_tray(app, mode);
+        tray_area.append(&tray);
+    }
 
     // Build a lookup from role name → widget, then append in the order
     // specified by layout.panel.order so users can reorder via rdm-settings.

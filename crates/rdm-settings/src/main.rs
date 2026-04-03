@@ -2510,9 +2510,9 @@ fn build_layout_section(config: &Rc<RefCell<RdmConfig>>) -> (GtkBox, Rc<dyn Fn()
     let mut items: Vec<LayoutItem> = vec![
         LayoutItem { id: "launcher".to_string(),  display: "Launcher".to_string(),  kind: LayoutItemKind::Builtin, zone: layout.panel.launcher.clone(),  enabled: true },
         LayoutItem { id: "taskbar".to_string(),   display: "Taskbar".to_string(),   kind: LayoutItemKind::Builtin, zone: layout.panel.taskbar.clone(),   enabled: true },
-        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::HideableBuiltin, zone: layout.panel.clock.clone(), enabled: config.borrow().panel.show_clock },
-        LayoutItem { id: "sys_popup".to_string(), display: "Sys Popup".to_string(), kind: LayoutItemKind::Builtin, zone: layout.panel.sys_popup.clone(), enabled: true },
-        LayoutItem { id: "tray".to_string(),      display: "Tray".to_string(),      kind: LayoutItemKind::Builtin, zone: layout.panel.tray.clone(),      enabled: true },
+        LayoutItem { id: "clock".to_string(),     display: "Clock".to_string(),     kind: LayoutItemKind::HideableBuiltin, zone: layout.panel.clock.clone(),     enabled: config.borrow().panel.show_clock },
+        LayoutItem { id: "sys_popup".to_string(), display: "Sys Popup".to_string(), kind: LayoutItemKind::HideableBuiltin, zone: layout.panel.sys_popup.clone(), enabled: config.borrow().panel.show_sys_popup },
+        LayoutItem { id: "tray".to_string(),      display: "Battery & Session".to_string(), kind: LayoutItemKind::HideableBuiltin, zone: layout.panel.tray.clone(), enabled: config.borrow().panel.show_battery_session },
     ];
 
     // Enabled plugins from config first (preserves order)
@@ -2841,11 +2841,23 @@ fn save_layout_items(items: &[LayoutItem], theme_name: &str, config: &Rc<RefCell
         log::error!("Failed to save layout.toml: {}", e);
     }
 
-    // Persist show_clock from the clock HideableBuiltin item
-    if let Some(clock_item) = items.iter().find(|i| i.id == "clock" && i.kind == LayoutItemKind::HideableBuiltin) {
-        config.borrow_mut().panel.show_clock = clock_item.enabled;
+    // Persist show_* flags from HideableBuiltin items
+    let mut dirty = false;
+    if let Some(item) = items.iter().find(|i| i.id == "clock" && i.kind == LayoutItemKind::HideableBuiltin) {
+        config.borrow_mut().panel.show_clock = item.enabled;
+        dirty = true;
+    }
+    if let Some(item) = items.iter().find(|i| i.id == "tray" && i.kind == LayoutItemKind::HideableBuiltin) {
+        config.borrow_mut().panel.show_tray = item.enabled;
+        dirty = true;
+    }
+    if let Some(item) = items.iter().find(|i| i.id == "sys_popup" && i.kind == LayoutItemKind::HideableBuiltin) {
+        config.borrow_mut().panel.show_sys_popup = item.enabled;
+        dirty = true;
+    }
+    if dirty {
         if let Err(e) = config.borrow().save() {
-            log::error!("Failed to save show_clock to rdm.toml: {}", e);
+            log::error!("Failed to save panel visibility flags to rdm.toml: {}", e);
         }
     }
 
