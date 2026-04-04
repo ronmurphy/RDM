@@ -207,6 +207,30 @@ else
     ok "Updated labwc autostart (previous saved as autostart.bak)"
 fi
 
+# ─── Copy rdm-autostart ───────────────────────────────────────
+
+RDM_CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"
+mkdir -p "$RDM_CFG_DIR"
+
+if [ ! -f "$RDM_CFG_DIR/autostart" ]; then
+    cp config/rdm-autostart "$RDM_CFG_DIR/autostart"
+    chmod +x "$RDM_CFG_DIR/autostart"
+    ok "Copied rdm-autostart → $RDM_CFG_DIR/autostart"
+else
+    # Preserve user entries: back up, write new managed section, re-append user lines
+    USER_MARKER="# ── USER AUTOSTART"
+    OLD="$RDM_CFG_DIR/autostart"
+    cp "$OLD" "$OLD.bak"
+    # Extract user lines (everything after the marker, non-comment non-empty)
+    USER_LINES=$(awk "/^${USER_MARKER}/{found=1; next} found && /^[^#]/ && NF" "$OLD" || true)
+    cp config/rdm-autostart "$OLD"
+    chmod +x "$OLD"
+    if [ -n "$USER_LINES" ]; then
+        printf '%s\n' "$USER_LINES" >> "$OLD"
+    fi
+    ok "Updated rdm-autostart managed section (user entries preserved, previous saved as autostart.bak)"
+fi
+
 # ─── Install portal config ─────────────────────────────────────
 
 PORTAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal"
@@ -228,6 +252,7 @@ sudo install -Dm644 config/rdm.toml       "$PREFIX/share/rdm/rdm.toml"
 sudo install -Dm644 config/session.toml    "$PREFIX/share/rdm/session.toml"
 sudo install -Dm644 config/labwc-rc.xml      "$PREFIX/share/rdm/labwc-rc.xml"
 sudo install -Dm755 config/labwc-autostart   "$PREFIX/share/rdm/labwc-autostart"
+sudo install -Dm755 config/rdm-autostart     "$PREFIX/share/rdm/rdm-autostart"
 sudo install -Dm644 config/rdm-portals.conf  "$PREFIX/share/rdm/rdm-portals.conf"
 
 ok "Default configs → $PREFIX/share/rdm/"

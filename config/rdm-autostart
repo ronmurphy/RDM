@@ -1,0 +1,15 @@
+#!/bin/sh
+# rdm-autostart — RDM session autostart
+# Called from ~/.config/labwc/autostart after rdm-session starts.
+#
+# The MANAGED section is maintained by RDM and install.sh — do not edit it.
+# Add your own startup commands in the USER AUTOSTART section below,
+# or use RDM Settings > Autostart to manage them from the UI.
+
+# ── MANAGED BY RDM — do not edit ──────────────────────────────────────
+# Inhibit screen blanking while audio is playing
+if command -v rdm-idle-inhibit >/dev/null 2>&1; then
+    rdm-idle-inhibit &
+fi
+
+# ── USER AUTOSTART — add your entries below ────────────────────────────

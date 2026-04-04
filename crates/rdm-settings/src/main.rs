@@ -128,6 +128,10 @@ fn build_ui(app: &Application) {
     let displays_page = build_displays_page(&config);
     stack.add_titled(&displays_page, Some("displays"), "Displays");
 
+    // --- Autostart page ---
+    let autostart_page = build_autostart_page();
+    stack.add_titled(&autostart_page, Some("autostart"), "Autostart");
+
     // --- Diagnostics page ---
     let diagnostics_page = build_diagnostics_page();
     stack.add_titled(&diagnostics_page, Some("diagnostics"), "Diagnostics");
@@ -1199,6 +1203,184 @@ fn build_theme_editor_section(
     save_row.append(&status_label);
     save_row.append(&save_btn);
     page.append(&save_row);
+
+    page
+}
+
+// ── Autostart helpers ─────────────────────────────────────────────────────────
+
+const AUTOSTART_PATH_SUFFIX: &str = ".config/rdm/autostart";
+const USER_MARKER: &str = "# ── USER AUTOSTART";
+
+fn autostart_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(|h| std::path::PathBuf::from(h).join(AUTOSTART_PATH_SUFFIX))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/rdm-autostart"))
+}
+
+/// Read all user-section command entries (strips trailing `&`).
+fn read_user_entries() -> Vec<String> {
+    let Ok(content) = std::fs::read_to_string(autostart_path()) else { return Vec::new() };
+    let mut in_user = false;
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        if line.starts_with(USER_MARKER) { in_user = true; continue; }
+        if !in_user { continue; }
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') { continue; }
+        entries.push(t.trim_end_matches('&').trim().to_string());
+    }
+    entries
+}
+
+/// Rewrite the file: keep everything up to and including the marker line,
+/// then write the given entries as `command &` lines.
+fn write_user_entries(entries: &[String]) {
+    let path = autostart_path();
+    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    let mut out = String::new();
+    for line in content.lines() {
+        out.push_str(line);
+        out.push('\n');
+        if line.starts_with(USER_MARKER) { break; }
+    }
+    if !entries.is_empty() {
+        out.push('\n');
+        for e in entries {
+            out.push_str(e);
+            if !e.trim_end().ends_with('&') { out.push_str(" &"); }
+            out.push('\n');
+        }
+    }
+    if let Err(e) = std::fs::write(&path, &out) {
+        log::error!("Failed to write autostart: {}", e);
+    }
+}
+
+fn build_autostart_page() -> GtkBox {
+    let page = GtkBox::new(Orientation::Vertical, 0);
+    page.set_margin_top(16);
+    page.set_margin_bottom(16);
+    page.set_margin_start(20);
+    page.set_margin_end(20);
+
+    let header = Label::new(Some("Autostart"));
+    header.add_css_class("settings-header");
+    header.set_halign(gtk4::Align::Start);
+    page.append(&header);
+
+    let hint = Label::new(Some(
+        "Commands that run automatically when your session starts. Changes take effect at next login.",
+    ));
+    hint.add_css_class("settings-hint");
+    hint.set_halign(gtk4::Align::Start);
+    hint.set_wrap(true);
+    hint.set_margin_bottom(12);
+    page.append(&hint);
+
+    // Scrollable list of user entries
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.add_css_class("boxed-list");
+
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_min_content_height(120);
+    scroll.set_max_content_height(320);
+    scroll.set_propagate_natural_height(true);
+    scroll.set_child(Some(&list));
+    page.append(&scroll);
+
+    // Shared entries state
+    let entries: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(read_user_entries()));
+
+    // Populate the list from entries state
+    let populate = {
+        let list_c    = list.clone();
+        let entries_c = entries.clone();
+        Rc::new(move || {
+            // Clear existing rows
+            while let Some(row) = list_c.first_child() { list_c.remove(&row); }
+            for (idx, cmd) in entries_c.borrow().iter().enumerate() {
+                let row_box = GtkBox::new(Orientation::Horizontal, 8);
+                row_box.set_margin_top(6);
+                row_box.set_margin_bottom(6);
+                row_box.set_margin_start(8);
+                row_box.set_margin_end(8);
+
+                let cmd_lbl = Label::new(Some(cmd));
+                cmd_lbl.set_halign(gtk4::Align::Start);
+                cmd_lbl.set_hexpand(true);
+                cmd_lbl.add_css_class("settings-value");
+                row_box.append(&cmd_lbl);
+
+                let remove_btn = Button::with_label("✕");
+                remove_btn.add_css_class("destructive-action");
+                remove_btn.set_tooltip_text(Some("Remove entry"));
+                row_box.append(&remove_btn);
+
+                let row = gtk4::ListBoxRow::new();
+                row.set_child(Some(&row_box));
+
+                let entries_r = entries_c.clone();
+                remove_btn.connect_clicked(move |btn| {
+                    entries_r.borrow_mut().remove(idx);
+                    write_user_entries(&entries_r.borrow());
+                    // Remove just this row from the list
+                    if let Some(r) = btn.ancestor(gtk4::ListBoxRow::static_type()) {
+                        if let Some(lb) = r.parent() {
+                            lb.downcast_ref::<gtk4::ListBox>()
+                                .map(|l| l.remove(&r));
+                        }
+                    }
+                });
+
+                list_c.append(&row);
+            }
+        })
+    };
+
+    populate();
+
+    // ── Add entry row ──────────────────────────────────────────────────────────
+    let add_row = GtkBox::new(Orientation::Horizontal, 8);
+    add_row.set_margin_top(10);
+
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("command (e.g. nm-applet)"));
+    entry.set_hexpand(true);
+
+    let add_btn = Button::with_label("+ Add");
+    add_btn.add_css_class("suggested-action");
+
+    add_row.append(&entry);
+    add_row.append(&add_btn);
+    page.append(&add_row);
+
+    let hint2 = Label::new(Some("Enter just the command name or full path — the & is added automatically."));
+    hint2.add_css_class("settings-hint");
+    hint2.set_halign(gtk4::Align::Start);
+    hint2.set_margin_top(4);
+    page.append(&hint2);
+
+    // Add button handler
+    {
+        let entry_c   = entry.clone();
+        let entries_c = entries.clone();
+        let pop_c     = populate.clone();
+        let do_add = move || {
+            let text = entry_c.text().trim().to_string();
+            if text.is_empty() { return; }
+            let cmd = text.trim_end_matches('&').trim().to_string();
+            entries_c.borrow_mut().push(cmd);
+            write_user_entries(&entries_c.borrow());
+            entry_c.set_text("");
+            pop_c();
+        };
+        let do_add_btn = do_add.clone();
+        add_btn.connect_clicked(move |_| do_add_btn());
+        entry.connect_activate(move |_| do_add());
+    }
 
     page
 }

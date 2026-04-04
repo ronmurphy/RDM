@@ -62,30 +62,30 @@
     </keybind>
 
     <!-- Workspaces -->
-    <keybind key="S-1">
+    <keybind key="W-1">
       <action name="GoToDesktop" to="1" />
     </keybind>
-    <keybind key="S-2">
+    <keybind key="W-2">
       <action name="GoToDesktop" to="2" />
     </keybind>
-    <keybind key="S-3">
+    <keybind key="W-3">
       <action name="GoToDesktop" to="3" />
     </keybind>
-    <keybind key="S-4">
+    <keybind key="W-4">
       <action name="GoToDesktop" to="4" />
     </keybind>
 
     <!-- Move window to workspace -->
-    <keybind key="S-S-1">
+    <keybind key="W-S-1">
       <action name="SendToDesktop" to="1" follow="true" />
     </keybind>
-    <keybind key="S-S-2">
+    <keybind key="W-S-2">
       <action name="SendToDesktop" to="2" follow="true" />
     </keybind>
-    <keybind key="S-S-3">
+    <keybind key="W-S-3">
       <action name="SendToDesktop" to="3" follow="true" />
     </keybind>
-    <keybind key="S-S-4">
+    <keybind key="W-S-4">
       <action name="SendToDesktop" to="4" follow="true" />
     </keybind>
 
