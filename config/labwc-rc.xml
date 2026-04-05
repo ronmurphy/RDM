@@ -137,7 +137,7 @@
     <keybind key="XF86AudioPrev">
       <action name="Execute" command="playerctl previous" />
     </keybind>
-    <!-- ==================== rdm-snap tiling ==================== -->
+    <!-- rdm-snap-keybinds-begin -->
     <!-- Tile / float focused window -->
     <keybind key="W-t">
       <action name="Execute" command="rdm-snap tile" />
@@ -182,6 +182,7 @@
     <keybind key="W-S-r">
       <action name="Execute" command="rdm-snap reset" />
     </keybind>
+    <!-- rdm-snap-keybinds-end -->
   </keyboard>
 
   <desktops number="4">

@@ -266,6 +266,38 @@ fn set_bluetooth(on: bool) {
     let _ = Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]).status();
 }
 
+fn read_tiling_enabled() -> bool {
+    Command::new("rdm-snap").arg("keybinds-status").output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "enabled")
+        .unwrap_or(false)
+}
+
+fn update_tiling_config(enabled: bool) {
+    let config_path = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        })
+        .join("rdm/rdm.toml");
+    let Ok(content) = std::fs::read_to_string(&config_path) else { return };
+    // Simple line-based update/insert for tiling_enabled
+    let key = "tiling_enabled";
+    let new_line = format!("{} = {}", key, enabled);
+    if content.contains(key) {
+        let updated: String = content.lines().map(|l| {
+            if l.trim().starts_with(key) { new_line.as_str() } else { l }
+        }).collect::<Vec<_>>().join("\n");
+        let _ = std::fs::write(&config_path, updated);
+    } else if content.contains("[snap]") {
+        let updated = content.replace("[snap]", &format!("[snap]\n{}", new_line));
+        let _ = std::fs::write(&config_path, updated);
+    } else {
+        let updated = format!("{}\n\n[snap]\n{}\n", content.trim_end(), new_line);
+        let _ = std::fs::write(&config_path, updated);
+    }
+}
+
 fn run_power_action(action: &str) {
     match action {
         "lock"     => { let _ = Command::new("swaylock").args(["-f", "-c", "1a1b26"]).spawn(); }
@@ -574,6 +606,39 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
         wifi_tile.add_controller(gesture);
     }
 
+    // ── Tiling toggle ─────────────────────────────────────────────────────────
+    let tile_bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    tile_bar.add_css_class("cmdcenter-section");
+    let tile_icon = gtk4::Label::new(Some("󰕰"));
+    tile_icon.add_css_class("cmdcenter-tile-icon");
+    let tile_lbl = gtk4::Label::new(Some("TILING"));
+    tile_lbl.add_css_class("cmdcenter-row-label");
+    tile_lbl.set_hexpand(true);
+    tile_lbl.set_halign(gtk4::Align::Start);
+    let tile_switch = gtk4::Switch::new();
+    tile_switch.set_halign(gtk4::Align::End);
+    tile_switch.set_valign(gtk4::Align::Center);
+    tile_bar.append(&tile_icon);
+    tile_bar.append(&tile_lbl);
+    tile_bar.append(&tile_switch);
+    root.append(&tile_bar);
+
+    let tile_updating = Rc::new(Cell::new(false));
+    {
+        let tu = tile_updating.clone();
+        tile_switch.connect_active_notify(move |sw| {
+            if tu.get() { return; }
+            let enabled = sw.is_active();
+            if enabled {
+                let _ = Command::new("rdm-snap").arg("enable-keybinds").status();
+            } else {
+                let _ = Command::new("rdm-snap").arg("disable-keybinds").status();
+            }
+            // Update rdm.toml
+            std::thread::spawn(move || update_tiling_config(enabled));
+        });
+    }
+
     // ── Calendar expander ──────────────────────────────────────────────────────
     let cal_bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     cal_bar.add_css_class("cmdcenter-section");
@@ -737,6 +802,8 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
         let bt_sw  = bt_switch.clone();
         let bt_upd = bt_updating.clone();
         let bt_st  = bt_state.clone();
+        let tile_sw  = tile_switch.clone();
+        let tile_upd = tile_updating.clone();
         btn.connect_notify_local(Some("active"), move |b, _| {
             if !b.is_active() { return; }
             // Volume
@@ -762,6 +829,18 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
                     bt_sw2.set_active(on);
                     bt_st2.set(on);
                     bt_upd2.set(false);
+                }
+            });
+            // Tiling (async)
+            let tile_sw2  = tile_sw.clone();
+            let tile_upd2 = tile_upd.clone();
+            let (tx_t, rx_t) = async_channel::bounded::<bool>(1);
+            std::thread::spawn(move || { let _ = tx_t.send_blocking(read_tiling_enabled()); });
+            glib::spawn_future_local(async move {
+                if let Ok(on) = rx_t.recv().await {
+                    tile_upd2.set(true);
+                    tile_sw2.set_active(on);
+                    tile_upd2.set(false);
                 }
             });
         });

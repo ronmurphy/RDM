@@ -1,5 +1,6 @@
 mod daemon;
 mod ipc;
+mod keybinds;
 mod layout;
 mod position;
 mod wayland;
@@ -43,6 +44,30 @@ fn main() {
                 }
             }
         }
+        "enable-keybinds" => {
+            if keybinds::enable() {
+                println!("Snap keybinds enabled in rc.xml");
+            } else {
+                println!("Snap keybinds already enabled (or rc.xml not found)");
+            }
+            return;
+        }
+        "disable-keybinds" => {
+            if keybinds::disable() {
+                println!("Snap keybinds removed from rc.xml");
+            } else {
+                println!("Snap keybinds not present in rc.xml");
+            }
+            return;
+        }
+        "keybinds-status" => {
+            if keybinds::are_enabled() {
+                println!("enabled");
+            } else {
+                println!("disabled");
+            }
+            return;
+        }
         "help" | "--help" | "-h" => {
             print_help();
             return;
@@ -84,6 +109,10 @@ Usage:
   rdm-snap grow-master      Increase master pane width
   rdm-snap shrink-master    Decrease master pane width
   rdm-snap reset            Rebuild layout (remove dead windows)
-  rdm-snap quit             Stop the daemon"
+  rdm-snap quit             Stop the daemon
+
+  rdm-snap enable-keybinds  Inject tiling keybinds into labwc rc.xml
+  rdm-snap disable-keybinds Remove tiling keybinds from labwc rc.xml
+  rdm-snap keybinds-status  Print 'enabled' or 'disabled'"
     );
 }
