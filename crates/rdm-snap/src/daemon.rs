@@ -18,6 +18,9 @@ struct OutputTiling {
 struct TilingState {
     /// Per-output tiling, keyed by output name.
     outputs: HashMap<String, OutputTiling>,
+    /// Remember the last output a window was tiled on, so after float+re-tile
+    /// it goes back to the same monitor instead of wherever focus drifted.
+    last_output: HashMap<u32, String>,
     master_ratio: f64,
     inner_gap: i32,
     outer_gap: i32,
@@ -27,6 +30,7 @@ impl TilingState {
     fn new(config: &RdmConfig) -> Self {
         Self {
             outputs: HashMap::new(),
+            last_output: HashMap::new(),
             master_ratio: config.snap.master_ratio,
             inner_gap: config.snap.inner_gap,
             outer_gap: config.snap.outer_gap,
@@ -40,10 +44,12 @@ impl TilingState {
     }
 
     /// Remove a window from whichever output it's tiled on.
+    /// Remembers the output so re-tiling can restore it.
     fn remove_window(&mut self, id: u32) -> Option<String> {
         for (name, ot) in &mut self.outputs {
             if let Some(pos) = ot.tiled.iter().position(|&w| w == id) {
                 ot.tiled.remove(pos);
+                self.last_output.insert(id, name.clone());
                 return Some(name.clone());
             }
         }
@@ -58,6 +64,20 @@ impl TilingState {
             }
         }
         None
+    }
+
+    /// Get the best output for a window: remembered output first, then Wayland-reported, then fallback.
+    fn best_output_for(&self, id: u32, wayland_output: Option<&str>, fallback: Option<&str>) -> Option<String> {
+        // 1. If we remember where it was last tiled, use that
+        if let Some(name) = self.last_output.get(&id) {
+            return Some(name.clone());
+        }
+        // 2. Use the output Wayland says it's on
+        if let Some(name) = wayland_output {
+            return Some(name.to_string());
+        }
+        // 3. Fallback to first output
+        fallback.map(|s| s.to_string())
     }
 }
 
@@ -211,30 +231,40 @@ fn handle_command(
         }
         SnapCommand::TileAll => {
             let state = shared.lock().unwrap();
-            // Group non-minimized windows by their output
+            let fallback = outputs.first().map(|o| o.name.as_str());
+            // Only assign windows that are NOT already tiled on some output.
+            // For previously-floated windows, prefer their remembered output
+            // over the Wayland-reported one (which may have drifted due to
+            // focus changes during the activate/F24 cycle).
             for (&id, info) in &state.toplevels {
                 if info.is_minimized { continue; }
-                let out_name = info.output_name.as_deref()
-                    .or_else(|| outputs.first().map(|o| o.name.as_str()));
-                if let Some(name) = out_name {
-                    // Remove from any other output first
-                    for (_, ot) in &mut tiling.outputs {
-                        ot.tiled.retain(|&w| w != id);
-                    }
-                    let ot = tiling.get_output(name);
-                    if !ot.tiled.contains(&id) {
-                        ot.tiled.push(id);
-                    }
+                // Already tiled somewhere? Keep it there.
+                if tiling.find_window(id).is_some() { continue; }
+                let best = tiling.best_output_for(
+                    id,
+                    info.output_name.as_deref(),
+                    fallback,
+                );
+                if let Some(name) = best {
+                    log::info!("Assigning window {} to output {} (remembered: {})",
+                        id, name, tiling.last_output.contains_key(&id));
+                    let ot = tiling.get_output(&name);
+                    ot.tiled.push(id);
                 }
             }
+            // Also prune dead windows (closed since last tile)
+            let live_ids: Vec<u32> = state.toplevels.keys().copied().collect();
             drop(state);
+            for (_, ot) in &mut tiling.outputs {
+                ot.tiled.retain(|id| live_ids.contains(id));
+            }
             // Apply layout on each output that has tiled windows
             let output_names: Vec<String> = tiling.outputs.keys().cloned().collect();
             for out_name in &output_names {
                 if let Some((x, y, w, h)) = find_output(&outputs, out_name) {
-                    log::info!("Tiling {} windows on output {}",
-                        tiling.outputs.get(out_name).map(|o| o.tiled.len()).unwrap_or(0),
-                        out_name);
+                    let count = tiling.outputs.get(out_name).map(|o| o.tiled.len()).unwrap_or(0);
+                    if count == 0 { continue; }
+                    log::info!("Tiling {} windows on output {}", count, out_name);
                     apply_layout_for_output(tiling, out_name, x, y, w, h, action_tx, None);
                 }
             }
