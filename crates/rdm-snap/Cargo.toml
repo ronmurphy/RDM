@@ -11,9 +11,7 @@ path = "src/main.rs"
 wayland-client = { workspace = true }
 wayland-protocols = { workspace = true }
 wayland-protocols-wlr = { workspace = true }
-gtk4 = { workspace = true }
-gtk4-layer-shell = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
-nix = { workspace = true }
+nix = { workspace = true, features = ["poll"] }
 rdm-common = { workspace = true }

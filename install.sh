@@ -207,6 +207,10 @@ else
     ok "Updated labwc autostart (previous saved as autostart.bak)"
 fi
 
+# ─── Copy rdm-snap keybinds ───────────────────────────────────
+cp config/rdm-snap-keybinds.xml "$LABWC_DIR/rdm-snap-keybinds.xml"
+ok "Copied rdm-snap-keybinds.xml → $LABWC_DIR/"
+
 # ─── Copy rdm-autostart ───────────────────────────────────────
 
 RDM_CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rdm"
@@ -254,6 +258,7 @@ sudo install -Dm644 config/labwc-rc.xml      "$PREFIX/share/rdm/labwc-rc.xml"
 sudo install -Dm755 config/labwc-autostart   "$PREFIX/share/rdm/labwc-autostart"
 sudo install -Dm755 config/rdm-autostart     "$PREFIX/share/rdm/rdm-autostart"
 sudo install -Dm644 config/rdm-portals.conf  "$PREFIX/share/rdm/rdm-portals.conf"
+sudo install -Dm644 config/rdm-snap-keybinds.xml "$PREFIX/share/rdm/rdm-snap-keybinds.xml"
 
 ok "Default configs → $PREFIX/share/rdm/"
 

@@ -1290,8 +1290,6 @@ name = "rdm-snap"
 version = "0.1.0"
 dependencies = [
  "env_logger",
- "gtk4",
- "gtk4-layer-shell",
  "log",
  "nix",
  "rdm-common",

@@ -137,6 +137,51 @@
     <keybind key="XF86AudioPrev">
       <action name="Execute" command="playerctl previous" />
     </keybind>
+    <!-- ==================== rdm-snap tiling ==================== -->
+    <!-- Tile / float focused window -->
+    <keybind key="W-t">
+      <action name="Execute" command="rdm-snap tile" />
+    </keybind>
+    <keybind key="W-S-t">
+      <action name="Execute" command="rdm-snap float" />
+    </keybind>
+
+    <!-- Tile all open windows -->
+    <keybind key="W-A-t">
+      <action name="Execute" command="rdm-snap tile-all" />
+    </keybind>
+
+    <!-- Focus navigation (vim-style) -->
+    <keybind key="W-A-h">
+      <action name="Execute" command="rdm-snap focus left" />
+    </keybind>
+    <keybind key="W-A-l">
+      <action name="Execute" command="rdm-snap focus right" />
+    </keybind>
+    <keybind key="W-A-k">
+      <action name="Execute" command="rdm-snap focus up" />
+    </keybind>
+    <keybind key="W-A-j">
+      <action name="Execute" command="rdm-snap focus down" />
+    </keybind>
+
+    <!-- Swap focused window with master -->
+    <keybind key="W-S-m">
+      <action name="Execute" command="rdm-snap swap-master" />
+    </keybind>
+
+    <!-- Grow / shrink master pane -->
+    <keybind key="W-bracketright">
+      <action name="Execute" command="rdm-snap grow-master" />
+    </keybind>
+    <keybind key="W-bracketleft">
+      <action name="Execute" command="rdm-snap shrink-master" />
+    </keybind>
+
+    <!-- Reset layout -->
+    <keybind key="W-S-r">
+      <action name="Execute" command="rdm-snap reset" />
+    </keybind>
   </keyboard>
 
   <desktops number="4">

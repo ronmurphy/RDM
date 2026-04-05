@@ -103,6 +103,21 @@ pub struct SnapConfig {
     pub edge_threshold: i32,
     #[serde(default = "default_true")]
     pub show_preview: bool,
+    /// Enable the rdm-snap tiling daemon
+    #[serde(default)]
+    pub tiling_enabled: bool,
+    /// Master pane width as a fraction of the output (0.0–1.0)
+    #[serde(default = "default_master_ratio")]
+    pub master_ratio: f64,
+    /// Gap between tiled windows in pixels
+    #[serde(default = "default_gap")]
+    pub inner_gap: i32,
+    /// Gap between tiled windows and screen edges in pixels
+    #[serde(default = "default_gap")]
+    pub outer_gap: i32,
+    /// Automatically tile new windows into the layout
+    #[serde(default)]
+    pub auto_tile: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -192,6 +207,12 @@ fn default_launcher_ui_mode() -> String {
 fn default_snap_threshold() -> i32 {
     20
 }
+fn default_master_ratio() -> f64 {
+    0.55
+}
+fn default_gap() -> i32 {
+    8
+}
 fn default_taskbar_mode() -> String {
     "icons".into()
 }
@@ -268,6 +289,11 @@ impl Default for SnapConfig {
         Self {
             edge_threshold: default_snap_threshold(),
             show_preview: true,
+            tiling_enabled: false,
+            master_ratio: default_master_ratio(),
+            inner_gap: default_gap(),
+            outer_gap: default_gap(),
+            auto_tile: false,
         }
     }
 }
