@@ -8,6 +8,10 @@ use wayland_client::{
     protocol::{wl_output, wl_registry, wl_seat},
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
+use wayland_protocols::xdg::xdg_output::zv1::client::{
+    zxdg_output_manager_v1::ZxdgOutputManagerV1,
+    zxdg_output_v1::{self, ZxdgOutputV1},
+};
 use wayland_protocols_wlr::foreign_toplevel::v1::client::{
     zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1},
     zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
@@ -23,6 +27,8 @@ pub struct ToplevelInfo {
     pub is_maximized: bool,
     pub is_minimized: bool,
     pub is_fullscreen: bool,
+    /// Name of the output this window is currently on (from OutputEnter).
+    pub output_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,23 +64,33 @@ struct WaylandState {
     seat: Option<WlSeat>,
     action_rx: std::sync::mpsc::Receiver<ToplevelAction>,
     id_to_handle: HashMap<u32, ZwlrForeignToplevelHandleV1>,
-    // Output tracking
+    // Output tracking: wl_output ObjectId → pending output data (from wl_output events)
     output_pending: HashMap<wayland_client::backend::ObjectId, OutputPending>,
+    // Map wl_output ObjectId → output name (so we can resolve OutputEnter events)
+    wl_output_id_to_name: HashMap<wayland_client::backend::ObjectId, String>,
 }
 
 struct HandleState {
     title: String,
     app_id: String,
     states: Vec<u8>,
+    /// The wl_output ObjectId this toplevel is currently on (last OutputEnter).
+    current_output: Option<wayland_client::backend::ObjectId>,
 }
 
 #[derive(Default)]
 struct OutputPending {
     name: String,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
+    // From xdg-output (logical position — what we actually need)
+    logical_x: i32,
+    logical_y: i32,
+    logical_w: i32,
+    logical_h: i32,
+    // Fallback from wl_output mode (used if xdg-output doesn't provide size)
+    mode_w: i32,
+    mode_h: i32,
+    has_xdg_pos: bool,
+    has_xdg_size: bool,
 }
 
 impl HandleState {
@@ -85,7 +101,10 @@ impl HandleState {
             .any(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) == val)
     }
 
-    fn to_info(&self) -> ToplevelInfo {
+    fn to_info(&self, wl_output_id_to_name: &HashMap<wayland_client::backend::ObjectId, String>) -> ToplevelInfo {
+        let output_name = self.current_output.as_ref()
+            .and_then(|oid| wl_output_id_to_name.get(oid))
+            .cloned();
         ToplevelInfo {
             title: self.title.clone(),
             app_id: self.app_id.clone(),
@@ -93,6 +112,7 @@ impl HandleState {
             is_maximized: self.has_state(zwlr_foreign_toplevel_handle_v1::State::Maximized),
             is_minimized: self.has_state(zwlr_foreign_toplevel_handle_v1::State::Minimized),
             is_fullscreen: self.has_state(zwlr_foreign_toplevel_handle_v1::State::Fullscreen),
+            output_name,
         }
     }
 }
@@ -102,7 +122,7 @@ impl WaylandState {
         let mut shared = self.shared.lock().unwrap();
         shared.toplevels.clear();
         for (&id, handle) in &self.handles {
-            shared.toplevels.insert(id, handle.to_info());
+            shared.toplevels.insert(id, handle.to_info(&self.wl_output_id_to_name));
         }
         shared.generation += 1;
     }
@@ -111,13 +131,23 @@ impl WaylandState {
         let mut shared = self.shared.lock().unwrap();
         shared.outputs.clear();
         for (_, op) in &self.output_pending {
-            if op.width > 0 && op.height > 0 {
+            let (x, y) = if op.has_xdg_pos {
+                (op.logical_x, op.logical_y)
+            } else {
+                (0, 0)
+            };
+            let (w, h) = if op.has_xdg_size {
+                (op.logical_w, op.logical_h)
+            } else {
+                (op.mode_w, op.mode_h)
+            };
+            if w > 0 && h > 0 {
                 shared.outputs.push(OutputInfo {
                     name: op.name.clone(),
-                    x: op.x,
-                    y: op.y,
-                    width: op.width,
-                    height: op.height,
+                    x,
+                    y,
+                    width: w,
+                    height: h,
                 });
             }
         }
@@ -171,6 +201,7 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for WaylandState {
                     title: String::new(),
                     app_id: String::new(),
                     states: Vec::new(),
+                    current_output: None,
                 });
             }
             zwlr_foreign_toplevel_manager_v1::Event::Finished => {
@@ -208,6 +239,18 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for WaylandState {
             zwlr_foreign_toplevel_handle_v1::Event::State { state: new_state } => {
                 if let Some(h) = state.handles.get_mut(&id) { h.states = new_state; }
             }
+            zwlr_foreign_toplevel_handle_v1::Event::OutputEnter { output } => {
+                if let Some(h) = state.handles.get_mut(&id) {
+                    h.current_output = Some(output.id());
+                }
+            }
+            zwlr_foreign_toplevel_handle_v1::Event::OutputLeave { output } => {
+                if let Some(h) = state.handles.get_mut(&id) {
+                    if h.current_output.as_ref() == Some(&output.id()) {
+                        h.current_output = None;
+                    }
+                }
+            }
             zwlr_foreign_toplevel_handle_v1::Event::Done => {
                 state.flush_toplevels();
             }
@@ -235,15 +278,17 @@ impl Dispatch<wl_output::WlOutput, ()> for WaylandState {
         _qh: &QueueHandle<Self>,
     ) {
         let obj_id = proxy.id();
-        let op = state.output_pending.entry(obj_id).or_default();
+        let op = state.output_pending.entry(obj_id.clone()).or_default();
         match event {
-            wl_output::Event::Name { name } => { op.name = name; }
-            wl_output::Event::Geometry { x, y, .. } => { op.x = x; op.y = y; }
+            wl_output::Event::Name { name } => {
+                op.name = name.clone();
+                state.wl_output_id_to_name.insert(obj_id, name);
+            }
             wl_output::Event::Mode { flags, width, height, .. } => {
                 if let wayland_client::WEnum::Value(f) = flags {
                     if f.contains(wl_output::Mode::Current) {
-                        op.width = width;
-                        op.height = height;
+                        op.mode_w = width;
+                        op.mode_h = height;
                     }
                 }
             }
@@ -252,6 +297,59 @@ impl Dispatch<wl_output::WlOutput, ()> for WaylandState {
             }
             _ => {}
         }
+    }
+}
+
+// ── Dispatch: xdg-output manager ─────────────────────────────────────────────
+
+impl Dispatch<ZxdgOutputManagerV1, ()> for WaylandState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &ZxdgOutputManagerV1,
+        _event: <ZxdgOutputManagerV1 as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // Manager has no events
+    }
+}
+
+// ── Dispatch: xdg-output ─────────────────────────────────────────────────────
+
+/// We store the wl_output ObjectId as user data so we can map xdg-output events
+/// back to the correct OutputPending entry.
+impl Dispatch<ZxdgOutputV1, wayland_client::backend::ObjectId> for WaylandState {
+    fn event(
+        state: &mut Self,
+        proxy: &ZxdgOutputV1,
+        event: zxdg_output_v1::Event,
+        wl_output_id: &wayland_client::backend::ObjectId,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        let Some(op) = state.output_pending.get_mut(wl_output_id) else { return };
+        match event {
+            zxdg_output_v1::Event::LogicalPosition { x, y } => {
+                op.logical_x = x;
+                op.logical_y = y;
+                op.has_xdg_pos = true;
+            }
+            zxdg_output_v1::Event::LogicalSize { width, height } => {
+                op.logical_w = width;
+                op.logical_h = height;
+                op.has_xdg_size = true;
+            }
+            zxdg_output_v1::Event::Name { name } => {
+                op.name = name.clone();
+                state.wl_output_id_to_name.insert(wl_output_id.clone(), name);
+            }
+            zxdg_output_v1::Event::Done => {
+                state.flush_outputs();
+            }
+            _ => {}
+        }
+        let _ = proxy; // suppress unused warning
     }
 }
 
@@ -312,6 +410,7 @@ fn run_wayland_loop(
         action_rx,
         id_to_handle: HashMap::new(),
         output_pending: HashMap::new(),
+        wl_output_id_to_name: HashMap::new(),
     };
 
     // Bind globals
@@ -324,13 +423,25 @@ fn run_wayland_loop(
         state.seat = Some(seat);
     }
 
-    // Bind outputs
+    // Bind xdg-output manager
+    let xdg_output_mgr = globals.bind::<ZxdgOutputManagerV1, _, _>(
+        &event_queue.handle(), 1..=3, ()
+    ).ok();
+    if xdg_output_mgr.is_none() {
+        log::warn!("xdg-output-manager not available — output positions will be inaccurate");
+    }
+
+    // Bind outputs and request xdg-output for each
     globals.contents().with_list(|list| {
         for global in list {
             if global.interface == "wl_output" {
-                let _output: wl_output::WlOutput = globals.registry()
+                let output: wl_output::WlOutput = globals.registry()
                     .bind(global.name, global.version, &event_queue.handle(), ());
-                // Output events will arrive in the dispatch loop
+                // Request xdg-output for this wl_output to get logical position/size
+                if let Some(mgr) = &xdg_output_mgr {
+                    let wl_id = output.id();
+                    let _xdg_out = mgr.get_xdg_output(&output, &event_queue.handle(), wl_id);
+                }
             }
         }
     });

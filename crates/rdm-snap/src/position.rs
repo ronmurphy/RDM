@@ -14,14 +14,18 @@ fn rc_xml_path() -> std::path::PathBuf {
 
 /// Inject or replace the F24 keybind block inside rc.xml, then reconfigure
 /// labwc and press F24 via wtype to apply the geometry.
-pub fn apply_one(geo: &WindowGeometry) -> Result<(), String> {
+///
+/// `output_name` ensures the window is sent to the correct output before
+/// positioning, so windows stay on their monitor.
+pub fn apply_one(geo: &WindowGeometry, output_name: &str) -> Result<(), String> {
     let keybind_block = format!(
         "{}\n    <keybind key=\"F24\">\n      \
+         <action name=\"MoveToOutput\" output=\"{}\" />\n      \
          <action name=\"Unmaximize\" />\n      \
          <action name=\"MoveTo\" x=\"{}\" y=\"{}\" />\n      \
          <action name=\"ResizeTo\" width=\"{}\" height=\"{}\" />\n    \
          </keybind>\n    {}",
-        MARKER_BEGIN, geo.x, geo.y, geo.width, geo.height, MARKER_END,
+        MARKER_BEGIN, output_name, geo.x, geo.y, geo.width, geo.height, MARKER_END,
     );
 
     inject_block(&keybind_block)?;
