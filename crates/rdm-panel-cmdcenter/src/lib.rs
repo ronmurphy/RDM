@@ -631,8 +631,12 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
             let enabled = sw.is_active();
             if enabled {
                 let _ = Command::new("rdm-snap").arg("enable-keybinds").status();
+                // Start the daemon if it isn't already running
+                let _ = Command::new("rdm-snap").arg("daemon").spawn();
             } else {
                 let _ = Command::new("rdm-snap").arg("disable-keybinds").status();
+                // Stop the daemon immediately
+                let _ = Command::new("rdm-snap").arg("quit").status();
             }
             // Update rdm.toml
             std::thread::spawn(move || update_tiling_config(enabled));

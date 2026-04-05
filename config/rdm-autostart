@@ -12,4 +12,9 @@ if command -v rdm-idle-inhibit >/dev/null 2>&1; then
     rdm-idle-inhibit &
 fi
 
+# Tiling daemon (enabled via command center toggle or rdm.toml)
+if command -v rdm-snap >/dev/null 2>&1; then
+    rdm-snap keybinds-status 2>/dev/null | grep -q enabled && rdm-snap daemon &
+fi
+
 # ── USER AUTOSTART — add your entries below ────────────────────────────
