@@ -26,6 +26,10 @@
     <topMaximize>yes</topMaximize>
   </snapping>
 
+  <placement>
+    <policy>cursor</policy>
+  </placement>
+
   <keyboard>
     <!-- App launcher (fires on release so Super+key combos work) -->
     <keybind key="Super_L" onRelease="yes">
