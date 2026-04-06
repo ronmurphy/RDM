@@ -415,7 +415,7 @@ fn build_swayidle_args() -> Vec<String> {
     if idle.lock_timeout_secs > 0 {
         args.push("timeout".to_string());
         args.push(idle.lock_timeout_secs.to_string());
-        args.push("swaylock -f -c 1a1b26".to_string());
+        args.push("rdm-lock --idle".to_string());
     }
 
     // Screen off: DPMS off after screen_off_secs, resume on input
@@ -430,7 +430,7 @@ fn build_swayidle_args() -> Vec<String> {
     // Lock before system sleep/suspend
     if idle.lock_before_sleep {
         args.push("before-sleep".to_string());
-        args.push("swaylock -f -c 1a1b26".to_string());
+        args.push("rdm-lock --idle".to_string());
     }
 
     log::info!("swayidle args: {:?}", args);

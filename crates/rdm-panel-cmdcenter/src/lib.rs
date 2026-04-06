@@ -300,7 +300,7 @@ fn update_tiling_config(enabled: bool) {
 
 fn run_power_action(action: &str) {
     match action {
-        "lock"     => { let _ = Command::new("swaylock").args(["-f", "-c", "1a1b26"]).spawn(); }
+        "lock"     => { let _ = Command::new("rdm-lock").spawn(); }
         "logout"   => { let _ = Command::new("pkill").arg("labwc").spawn(); }
         "shutdown" => { let _ = Command::new("systemctl").arg("poweroff").spawn(); }
         "reboot"   => { let _ = Command::new("systemctl").arg("reboot").spawn(); }

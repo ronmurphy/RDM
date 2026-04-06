@@ -112,9 +112,9 @@
     </keybind>
 
     <!-- ==================== Screen Lock ==================== -->
-    <!-- Super+L: lock screen -->
+    <!-- Super+L: lock screen with wallpaper, blank after 30s -->
     <keybind key="W-l">
-      <action name="Execute" command="swaylock -f -c 1a1b26" />
+      <action name="Execute" command="rdm-lock" />
     </keybind>
 
     <!-- ==================== Volume (multimedia keys) ==================== -->
@@ -131,6 +131,14 @@
       <action name="Execute" command="rdm-volume mic-mute" />
     </keybind>
 
+    <!-- ==================== Brightness ==================== -->
+    <keybind key="XF86MonBrightnessUp">
+      <action name="Execute" command="brightnessctl set +5%" />
+    </keybind>
+    <keybind key="XF86MonBrightnessDown">
+      <action name="Execute" command="brightnessctl set 5%-" />
+    </keybind>
+
     <!-- ==================== Media playback ==================== -->
     <keybind key="XF86AudioPlay">
       <action name="Execute" command="playerctl play-pause" />
@@ -142,50 +150,6 @@
       <action name="Execute" command="playerctl previous" />
     </keybind>
     <!-- rdm-snap-keybinds-begin -->
-    <!-- Tile / float focused window -->
-    <keybind key="W-t">
-      <action name="Execute" command="rdm-snap tile" />
-    </keybind>
-    <keybind key="W-S-t">
-      <action name="Execute" command="rdm-snap float" />
-    </keybind>
-
-    <!-- Tile all open windows -->
-    <keybind key="W-A-t">
-      <action name="Execute" command="rdm-snap tile-all" />
-    </keybind>
-
-    <!-- Focus navigation (vim-style) -->
-    <keybind key="W-A-h">
-      <action name="Execute" command="rdm-snap focus left" />
-    </keybind>
-    <keybind key="W-A-l">
-      <action name="Execute" command="rdm-snap focus right" />
-    </keybind>
-    <keybind key="W-A-k">
-      <action name="Execute" command="rdm-snap focus up" />
-    </keybind>
-    <keybind key="W-A-j">
-      <action name="Execute" command="rdm-snap focus down" />
-    </keybind>
-
-    <!-- Swap focused window with master -->
-    <keybind key="W-S-m">
-      <action name="Execute" command="rdm-snap swap-master" />
-    </keybind>
-
-    <!-- Grow / shrink master pane -->
-    <keybind key="W-bracketright">
-      <action name="Execute" command="rdm-snap grow-master" />
-    </keybind>
-    <keybind key="W-bracketleft">
-      <action name="Execute" command="rdm-snap shrink-master" />
-    </keybind>
-
-    <!-- Reset layout -->
-    <keybind key="W-S-r">
-      <action name="Execute" command="rdm-snap reset" />
-    </keybind>
     <!-- rdm-snap-keybinds-end -->
   </keyboard>
 

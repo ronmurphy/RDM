@@ -1,0 +1,38 @@
+#!/bin/sh
+# rdm-lock — lock screen with wallpaper background
+#
+# Uses the wallpaper from rdm.toml as the lock screen background.
+# Display blanking is handled by the global swayidle (via rdm-session).
+#
+# Usage:
+#   rdm-lock          Lock screen (blocks until unlock)
+#   rdm-lock --idle   Lock screen and daemonize (for swayidle/before-sleep)
+
+RDM_TOML="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/rdm.toml"
+FALLBACK_COLOR="#1a1b26"
+
+# ── Read wallpaper path from rdm.toml ────────────────────────────────
+WALLPAPER=""
+if [ -f "$RDM_TOML" ]; then
+    WALLPAPER=$(grep -A5 '^\[wallpaper\]' "$RDM_TOML" \
+        | grep '^path' \
+        | head -1 \
+        | sed 's/^path *= *"\(.*\)"/\1/')
+fi
+
+# ── Build args ───────────────────────────────────────────────────────
+ARGS="--indicator-caps-lock --show-failed-attempts"
+if [ -n "$WALLPAPER" ] && [ -f "$WALLPAPER" ]; then
+    ARGS="$ARGS -i $WALLPAPER -s fill"
+else
+    ARGS="$ARGS -c $FALLBACK_COLOR"
+fi
+
+# --idle: daemonize (for swayidle timeout / before-sleep)
+# otherwise: block (for Super+L keybind)
+if [ "${1:-}" = "--idle" ]; then
+    ARGS="-f $ARGS"
+fi
+
+# shellcheck disable=SC2086
+exec swaylock $ARGS
