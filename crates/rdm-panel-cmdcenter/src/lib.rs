@@ -298,6 +298,65 @@ fn update_tiling_config(enabled: bool) {
     }
 }
 
+// ── Battery helpers ───────────────────────────────────────────────────────────
+
+struct BatteryState {
+    capacity: u8,
+    charging: bool,
+}
+
+fn find_battery_path() -> Option<std::path::PathBuf> {
+    let ps_dir = std::path::Path::new("/sys/class/power_supply");
+    let mut entries: Vec<_> = std::fs::read_dir(ps_dir).ok()?.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let dev_type = std::fs::read_to_string(path.join("type")).unwrap_or_default();
+        if dev_type.trim() == "Battery" && path.join("capacity").exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn read_battery() -> Option<BatteryState> {
+    let base = find_battery_path()?;
+    let capacity: u8 = std::fs::read_to_string(base.join("capacity"))
+        .ok()?.trim().parse().unwrap_or(0);
+    let status = std::fs::read_to_string(base.join("status")).unwrap_or_default();
+    let charging = matches!(status.trim(), "Charging" | "Full");
+    Some(BatteryState { capacity, charging })
+}
+
+fn battery_icon(capacity: u8, charging: bool) -> &'static str {
+    if charging {
+        match capacity {
+            0..=20  => "\u{f089c}",
+            21..=30 => "\u{f0086}",
+            31..=40 => "\u{f0087}",
+            41..=60 => "\u{f0088}",
+            61..=70 => "\u{f0089}",
+            71..=80 => "\u{f089f}",
+            81..=90 => "\u{f008a}",
+            _       => "\u{f0085}",
+        }
+    } else {
+        match capacity {
+            0..=5   => "\u{f008e}",
+            6..=10  => "\u{f007a}",
+            11..=20 => "\u{f007b}",
+            21..=30 => "\u{f007c}",
+            31..=40 => "\u{f007d}",
+            41..=50 => "\u{f007e}",
+            51..=60 => "\u{f007f}",
+            61..=70 => "\u{f0080}",
+            71..=80 => "\u{f0081}",
+            81..=90 => "\u{f0082}",
+            _       => "\u{f0079}",
+        }
+    }
+}
+
 fn run_power_action(action: &str) {
     match action {
         "lock"     => { let _ = Command::new("rdm-lock").spawn(); }
@@ -606,22 +665,52 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
         wifi_tile.add_controller(gesture);
     }
 
-    // ── Tiling toggle ─────────────────────────────────────────────────────────
-    let tile_bar = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    tile_bar.add_css_class("cmdcenter-section");
+    // ── Row 3: Tiling tile | Battery tile (if laptop) ────────────────────────
+    let row3 = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+
+    // — Tiling tile —
+    let tile_tile = compact_tile();
     let tile_icon = gtk4::Label::new(Some("󰕰"));
+    tile_icon.set_halign(gtk4::Align::Center);
     tile_icon.add_css_class("cmdcenter-tile-icon");
     let tile_lbl = gtk4::Label::new(Some("TILING"));
     tile_lbl.add_css_class("cmdcenter-row-label");
-    tile_lbl.set_hexpand(true);
-    tile_lbl.set_halign(gtk4::Align::Start);
+    tile_lbl.set_halign(gtk4::Align::Center);
     let tile_switch = gtk4::Switch::new();
-    tile_switch.set_halign(gtk4::Align::End);
+    tile_switch.set_halign(gtk4::Align::Center);
     tile_switch.set_valign(gtk4::Align::Center);
-    tile_bar.append(&tile_icon);
-    tile_bar.append(&tile_lbl);
-    tile_bar.append(&tile_switch);
-    root.append(&tile_bar);
+    tile_tile.append(&tile_icon);
+    tile_tile.append(&tile_lbl);
+    tile_tile.append(&tile_switch);
+    row3.append(&tile_tile);
+
+    // — Battery tile (only on laptops) —
+    let has_battery = find_battery_path().is_some();
+    let bat_icon_lbl  = gtk4::Label::new(Some("󰁹"));
+    let bat_pct_lbl   = gtk4::Label::new(Some("–%"));
+    let bat_level_bar = gtk4::LevelBar::new();
+    if has_battery {
+        let bat_tile = compact_tile();
+        bat_icon_lbl.set_halign(gtk4::Align::Center);
+        bat_icon_lbl.add_css_class("cmdcenter-tile-icon");
+        let bat_lbl = gtk4::Label::new(Some("BATTERY"));
+        bat_lbl.add_css_class("cmdcenter-row-label");
+        bat_lbl.set_halign(gtk4::Align::Center);
+        bat_pct_lbl.add_css_class("cmdcenter-row-label");
+        bat_pct_lbl.set_halign(gtk4::Align::Center);
+        bat_level_bar.set_min_value(0.0);
+        bat_level_bar.set_max_value(100.0);
+        bat_level_bar.set_value(50.0);
+        bat_level_bar.set_hexpand(true);
+        bat_level_bar.add_css_class("cmdcenter-bat-bar");
+        bat_tile.append(&bat_icon_lbl);
+        bat_tile.append(&bat_lbl);
+        bat_tile.append(&bat_pct_lbl);
+        bat_tile.append(&bat_level_bar);
+        row3.append(&bat_tile);
+    }
+
+    root.append(&row3);
 
     let tile_updating = Rc::new(Cell::new(false));
     {
@@ -847,6 +936,15 @@ fn build_widget(cfg: Config) -> gtk4::MenuButton {
                     tile_upd2.set(false);
                 }
             });
+            // Battery (sync read — sysfs is fast)
+            if has_battery {
+                if let Some(bat) = read_battery() {
+                    bat_icon_lbl.set_text(battery_icon(bat.capacity, bat.charging));
+                    bat_pct_lbl.set_text(&format!("{}%{}", bat.capacity,
+                        if bat.charging { " ⚡" } else { "" }));
+                    bat_level_bar.set_value(bat.capacity as f64);
+                }
+            }
         });
     }
 
