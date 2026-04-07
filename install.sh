@@ -61,6 +61,9 @@ command -v polkit-gnome-authentication-agent-1 >/dev/null 2>&1 || \
     [ -x /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 ] || \
     opt_missing+=("polkit-gnome")
 command -v sway-audio-idle-inhibit >/dev/null 2>&1 || opt_missing+=("sway-audio-idle-inhibit (optional, for audio idle inhibit)")
+command -v wlopm          >/dev/null 2>&1 || opt_missing+=("wlopm (DPMS display power for lock screen blanking)")
+command -v wtype          >/dev/null 2>&1 || opt_missing+=("wtype (required for rdm-snap tiling)")
+command -v brightnessctl  >/dev/null 2>&1 || opt_missing+=("brightnessctl (for brightness keybinds)")
 
 if [ ${#missing[@]} -gt 0 ]; then
     err "Missing dependencies: ${missing[*]}"
@@ -69,7 +72,8 @@ if [ ${#missing[@]} -gt 0 ]; then
     echo "    sudo pacman -S labwc swaybg foot rust gtk4 gtk4-layer-shell grim slurp wl-clipboard wireplumber swayidle swaylock wlr-randr polkit-gnome"
     echo ""
     echo "  Optional (recommended):"
-    echo "    yay -S sway-audio-idle-inhibit  # AUR — inhibit idle while audio plays"
+    echo "    sudo pacman -S wlopm wtype brightnessctl"
+    echo "    yay -S sway-audio-idle-inhibit-git  # AUR — inhibit idle while audio plays"
     echo ""
     echo "  Then re-run this script."
     exit 1
