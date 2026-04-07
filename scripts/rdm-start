@@ -75,6 +75,12 @@ if pgrep -x rdm-session >/dev/null 2>&1; then
     sleep 0.5
 fi
 rdm-session >> "$LOG_FILE" 2>&1 &
+
+# Run user + RDM autostart entries (idle inhibit, user apps, etc.)
+AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/rdm/autostart"
+if [ -x "$AUTOSTART" ]; then
+    "$AUTOSTART"
+fi
 AUTOSTART_EOF
 chmod +x "$AUTOSTART"
 

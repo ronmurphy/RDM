@@ -1187,6 +1187,7 @@ dependencies = [
  "freedesktop-desktop-entry",
  "gtk4",
  "gtk4-layer-shell",
+ "libc",
  "libloading",
  "log",
  "rdm-common",

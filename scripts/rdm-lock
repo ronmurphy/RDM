@@ -28,11 +28,34 @@ else
     ARGS="$ARGS -c $FALLBACK_COLOR"
 fi
 
-# --idle: daemonize (for swayidle timeout / before-sleep)
-# otherwise: block (for Super+L keybind)
-if [ "${1:-}" = "--idle" ]; then
-    ARGS="-f $ARGS"
+# ── Ensure all outputs are on when swaylock needs to show ────────────
+# After DPMS blanking, the lock screen needs visible outputs to accept
+# the password.  Turn everything on before swaylock takes over.
+if command -v wlopm >/dev/null 2>&1; then
+    wlopm --on '*' 2>/dev/null
 fi
 
-# shellcheck disable=SC2086
-exec swaylock $ARGS
+# --idle: daemonize (for swayidle timeout / before-sleep).
+#   swaylock -f forks into background.  We spawn a watcher that polls
+#   for the swaylock process and restores DPMS when it exits (unlock).
+if [ "${1:-}" = "--idle" ]; then
+    # shellcheck disable=SC2086
+    swaylock -f $ARGS
+    # Background watcher: once swaylock disappears, turn screens on.
+    (
+        while pgrep -x swaylock >/dev/null 2>&1; do
+            sleep 1
+        done
+        if command -v wlopm >/dev/null 2>&1; then
+            wlopm --on '*' 2>/dev/null
+        fi
+    ) &
+else
+    # Blocking mode (Super+L): swaylock blocks until unlock.
+    # shellcheck disable=SC2086
+    swaylock $ARGS
+    # Restore all outputs after unlock.
+    if command -v wlopm >/dev/null 2>&1; then
+        wlopm --on '*' 2>/dev/null
+    fi
+fi

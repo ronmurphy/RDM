@@ -222,17 +222,19 @@ if [ ! -f "$RDM_CFG_DIR/autostart" ]; then
     chmod +x "$RDM_CFG_DIR/autostart"
     ok "Copied rdm-autostart → $RDM_CFG_DIR/autostart"
 else
-    # Preserve user entries: back up, write new managed section, re-append user lines
+    # Preserve user entries: back up, replace managed section, keep user lines verbatim
     USER_MARKER="# ── USER AUTOSTART"
     OLD="$RDM_CFG_DIR/autostart"
     cp "$OLD" "$OLD.bak"
-    # Extract user lines (everything after the marker, non-comment non-empty)
-    USER_LINES=$(awk "/^${USER_MARKER}/{found=1; next} found && /^[^#]/ && NF" "$OLD" || true)
-    cp config/rdm-autostart "$OLD"
-    chmod +x "$OLD"
-    if [ -n "$USER_LINES" ]; then
-        printf '%s\n' "$USER_LINES" >> "$OLD"
+    # Extract everything after (and including) the user marker line
+    USER_BLOCK=$(sed -n "/^${USER_MARKER}/,\$p" "$OLD" || true)
+    # Write the new managed section (everything up to but not including the marker)
+    sed -n "/^${USER_MARKER}/q;p" config/rdm-autostart > "$OLD"
+    # Re-append the original user block (marker + all user entries verbatim)
+    if [ -n "$USER_BLOCK" ]; then
+        printf '%s\n' "$USER_BLOCK" >> "$OLD"
     fi
+    chmod +x "$OLD"
     ok "Updated rdm-autostart managed section (user entries preserved, previous saved as autostart.bak)"
 fi
 

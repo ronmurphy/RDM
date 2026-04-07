@@ -50,6 +50,15 @@ fn main() {
         return;
     }
 
+    // Single-instance guard: prevent duplicate panels after suspend/wake cycles.
+    let _pid_lock = match acquire_pid_lock() {
+        Some(lock) => lock,
+        None => {
+            log::warn!("Not starting rdm-panel: another instance is already running");
+            return;
+        }
+    };
+
     let config = RdmConfig::load();
 
     let app = Application::builder()
@@ -161,19 +170,11 @@ fn build_panel(app: &Application, config: &RdmConfig) {
     let windows: Rc<std::cell::RefCell<HashMap<String, ApplicationWindow>>> =
         Rc::new(std::cell::RefCell::new(HashMap::new()));
 
-    // Create panel for each connected monitor
+    // Create panel for each currently connected monitor
     for i in 0..monitors.n_items() {
-        if let Some(obj) = monitors.item(i) {
-            if let Ok(monitor) = obj.downcast::<gtk4::gdk::Monitor>() {
-                let connector = monitor
-                    .connector()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| format!("unknown-{}", i));
-                log::info!("Creating panel for monitor: {}", connector);
-                let win = build_panel_window(app, config, &monitor, &shared_state, &action_tx);
-                windows.borrow_mut().insert(connector, win);
-            }
-        }
+        create_panel_for_monitor_at(
+            i, &monitors, app, config, &shared_state, &action_tx, &windows,
+        );
     }
 
     // Load CSS once for all windows
@@ -183,6 +184,87 @@ fn build_panel(app: &Application, config: &RdmConfig) {
         "Panel initialized with {} monitor(s)",
         windows.borrow().len()
     );
+
+    // --- Monitor hotplug: react to monitors being added or removed ---
+    // GTK4's Display::monitors() returns a GListModel.  The `items-changed`
+    // signal fires when outputs appear/disappear (e.g. wake from suspend,
+    // dock/undock).  We reconcile our window map with the current monitor list
+    // so we never end up with orphaned or duplicate panel windows.
+    let app_clone = app.clone();
+    let cfg_clone = config.clone();
+    let ss = shared_state.clone();
+    let atx = action_tx.clone();
+    let wins = windows.clone();
+    monitors.connect_items_changed(move |list, _pos, _removed, _added| {
+        log::info!(
+            "Monitor list changed (removed={}, added={}); reconciling panels",
+            _removed, _added,
+        );
+
+        // Collect current set of connector names from GTK.
+        let mut current_connectors = HashMap::new();
+        for i in 0..list.n_items() {
+            if let Some(obj) = list.item(i) {
+                if let Ok(mon) = obj.downcast::<gtk4::gdk::Monitor>() {
+                    let conn = mon
+                        .connector()
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| format!("unknown-{}", i));
+                    current_connectors.insert(conn, (i, mon));
+                }
+            }
+        }
+
+        let mut wins_map = wins.borrow_mut();
+
+        // Remove windows for monitors that are gone.
+        let stale: Vec<String> = wins_map
+            .keys()
+            .filter(|k| !current_connectors.contains_key(*k))
+            .cloned()
+            .collect();
+        for conn in stale {
+            if let Some(win) = wins_map.remove(&conn) {
+                log::info!("Removing panel for disconnected monitor: {}", conn);
+                win.close();
+            }
+        }
+
+        // Add windows for new monitors.
+        for (conn, (_idx, mon)) in &current_connectors {
+            if !wins_map.contains_key(conn) {
+                log::info!("Creating panel for new monitor: {}", conn);
+                let win = build_panel_window(
+                    &app_clone, &cfg_clone, mon, &ss, &atx,
+                );
+                wins_map.insert(conn.clone(), win);
+            }
+        }
+    });
+}
+
+fn create_panel_for_monitor_at(
+    i: u32,
+    monitors: &gtk4::gio::ListModel,
+    app: &Application,
+    config: &RdmConfig,
+    shared_state: &Arc<Mutex<toplevel::SharedState>>,
+    action_tx: &Rc<std::sync::mpsc::Sender<toplevel::ToplevelAction>>,
+    windows: &Rc<std::cell::RefCell<HashMap<String, ApplicationWindow>>>,
+) {
+    if let Some(obj) = monitors.item(i) {
+        if let Ok(monitor) = obj.downcast::<gtk4::gdk::Monitor>() {
+            let connector = monitor
+                .connector()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| format!("unknown-{}", i));
+            if !windows.borrow().contains_key(&connector) {
+                log::info!("Creating panel for monitor: {}", connector);
+                let win = build_panel_window(app, config, &monitor, shared_state, action_tx);
+                windows.borrow_mut().insert(connector, win);
+            }
+        }
+    }
 }
 
 fn build_panel_window(
@@ -409,4 +491,40 @@ fn load_css() {
         &css,
         gtk4::STYLE_PROVIDER_PRIORITY_USER + 1,
     );
+}
+
+/// File-lock based single-instance guard.
+///
+/// Uses `flock(LOCK_EX | LOCK_NB)` on a lock file — this is race-free and
+/// automatically released when the process exits (even on crash/SIGKILL).
+/// Returns `Some(PidLock)` if we acquired the lock, `None` if another instance holds it.
+struct PidLock {
+    _file: fs::File, // held open for the process lifetime; lock released on drop
+}
+
+fn acquire_pid_lock() -> Option<PidLock> {
+    use std::os::unix::io::AsRawFd;
+
+    let run_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    let lock_path = std::path::PathBuf::from(run_dir).join("rdm-panel.lock");
+
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .ok()?;
+
+    // LOCK_EX | LOCK_NB: exclusive, non-blocking.  Returns EWOULDBLOCK if held.
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        return None; // Another instance holds the lock.
+    }
+
+    // Write our PID for debugging (lock is already held).
+    use std::io::Write;
+    let mut f = &file;
+    let _ = f.write_all(format!("{}\n", std::process::id()).as_bytes());
+
+    Some(PidLock { _file: file })
 }
