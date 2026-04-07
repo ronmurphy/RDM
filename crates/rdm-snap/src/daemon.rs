@@ -82,6 +82,15 @@ impl TilingState {
 }
 
 pub fn run_daemon() {
+    // Single-instance guard: prevent duplicate daemons from stacking up.
+    let _lock = match acquire_daemon_lock() {
+        Some(lock) => lock,
+        None => {
+            eprintln!("rdm-snap: another daemon is already running");
+            return;
+        }
+    };
+
     let config = RdmConfig::load();
     log::info!(
         "rdm-snap daemon starting (master_ratio={}, gaps={}+{})",
@@ -397,4 +406,34 @@ fn apply_all_outputs(
     if let Some(focus_id) = restore_focus {
         let _ = action_tx.send(ToplevelAction::Activate(focus_id));
     }
+}
+
+/// File-lock based single-instance guard for the daemon.
+struct DaemonLock {
+    _file: std::fs::File,
+}
+
+fn acquire_daemon_lock() -> Option<DaemonLock> {
+    use std::os::unix::io::AsRawFd;
+
+    let run_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    let lock_path = std::path::PathBuf::from(run_dir).join("rdm-snap.lock");
+
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .ok()?;
+
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        return None;
+    }
+
+    use std::io::Write;
+    let mut f = &file;
+    let _ = f.write_all(format!("{}\n", std::process::id()).as_bytes());
+
+    Some(DaemonLock { _file: file })
 }

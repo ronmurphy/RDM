@@ -11,6 +11,7 @@ path = "src/main.rs"
 wayland-client = { workspace = true }
 wayland-protocols = { workspace = true }
 wayland-protocols-wlr = { workspace = true }
+libc = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 nix = { workspace = true, features = ["poll"] }

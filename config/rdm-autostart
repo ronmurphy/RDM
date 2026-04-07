@@ -7,6 +7,14 @@
 # or use RDM Settings > Autostart to manage them from the UI.
 
 # ── MANAGED BY RDM — do not edit ──────────────────────────────────────
+
+# Single-instance guard — prevent duplicate autostart processes
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/rdm-autostart.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "rdm-autostart: already running, skipping" >&2
+    exit 0
+fi
 # Inhibit screen blanking while audio is playing
 if command -v rdm-idle-inhibit >/dev/null 2>&1; then
     rdm-idle-inhibit &
