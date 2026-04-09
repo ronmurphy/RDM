@@ -4,8 +4,13 @@ use gtk4::Application;
 mod layout_app;
 
 fn main() {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("rfm=info,info"),
+    )
+    .init();
+
     let app = Application::builder()
-        .application_id("com.example.rfm")
+        .application_id("org.rdm.rfm")
         .build();
 
     app.connect_activate(|app| {

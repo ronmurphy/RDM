@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=rFM
+GenericName=File Manager
+Comment=RDM traditional file manager
+Exec=rfm
+Icon=system-file-manager
+Terminal=false
+Categories=FileManager;System;GTK;
+Keywords=files;file manager;browser;rdm;rfm;
+StartupNotify=true
+StartupWMClass=rfm
+MimeType=inode/directory;

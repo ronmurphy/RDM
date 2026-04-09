@@ -122,6 +122,7 @@ CRATES=(
     rdm-snap
     rdm-watermark
     rdm-notify
+    rfm
 #    rdm-editor
 )
 
@@ -144,11 +145,13 @@ done
 
 # Install scripts
 info "Installing scripts..."
-sudo install -Dm755 scripts/rdm-start      "$PREFIX/bin/rdm-start"
-sudo install -Dm755 scripts/rdm-reload     "$PREFIX/bin/rdm-reload"
-sudo install -Dm755 scripts/rdm-screenshot "$PREFIX/bin/rdm-screenshot"
-sudo install -Dm755 scripts/rdm-volume     "$PREFIX/bin/rdm-volume"
-ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume"
+sudo install -Dm755 scripts/rdm-start         "$PREFIX/bin/rdm-start"
+sudo install -Dm755 scripts/rdm-reload        "$PREFIX/bin/rdm-reload"
+sudo install -Dm755 scripts/rdm-screenshot    "$PREFIX/bin/rdm-screenshot"
+sudo install -Dm755 scripts/rdm-volume        "$PREFIX/bin/rdm-volume"
+sudo install -Dm755 scripts/rdm-idle-inhibit  "$PREFIX/bin/rdm-idle-inhibit"
+sudo install -Dm755 scripts/rdm-lock          "$PREFIX/bin/rdm-lock"
+ok "rdm-start, rdm-reload, rdm-screenshot, rdm-volume, rdm-idle-inhibit, rdm-lock"
 
 echo ""
 echo -e "${GREEN}${BOLD}  ✓ All $TOTAL crates built and installed.${NC}"

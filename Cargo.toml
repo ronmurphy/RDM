@@ -18,6 +18,7 @@ members = [
     "crates/rdm-noterm",
     # "crates/rdm-editor",  # removed — heavy deps (webkit6, sourceview5)
     "crates/rdm-dock",
+    "crates/rfm",
 ]
 resolver = "2"
 

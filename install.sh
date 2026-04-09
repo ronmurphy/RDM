@@ -106,8 +106,9 @@ sudo install -Dm755 target/release/rdm-settings    "$PREFIX/bin/rdm-settings"
 sudo install -Dm755 target/release/rdm-notify      "$PREFIX/bin/rdm-notify"
 sudo install -Dm755 target/release/rdm-dock        "$PREFIX/bin/rdm-dock"
 sudo install -Dm755 target/release/rdm-noterm      "$PREFIX/bin/rdm-noterm"
+sudo install -Dm755 target/release/rfm             "$PREFIX/bin/rfm"
 
-ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-dock, rdm-noterm"
+ok "rdm-panel, rdm-launcher, rdm-session, rdm-snap, rdm-watermark, rdm-settings, rdm-notify, rdm-dock, rdm-noterm, rfm"
 
 # ─── Install scripts ───────────────────────────────────────────
 
@@ -131,10 +132,11 @@ sudo install -Dm644 config/rdm.desktop           /usr/share/wayland-sessions/rdm
 sudo install -Dm644 config/rdm-editor.desktop    /usr/share/applications/rdm-editor.desktop
 sudo install -Dm644 config/rdm-settings.desktop  /usr/share/applications/rdm-settings.desktop
 sudo install -Dm644 config/rdm-noterm.desktop    /usr/share/applications/rdm-noterm.desktop
+sudo install -Dm644 config/rfm.desktop           /usr/share/applications/rfm.desktop
 sudo install -Dm644 config/rdm-launcher.desktop  /usr/share/applications/rdm-launcher.desktop
 
 ok "Session entry: /usr/share/wayland-sessions/rdm.desktop"
-ok "App entries:   rdm-editor, rdm-settings, rdm-noterm, rdm-launcher"
+ok "App entries:   rdm-editor, rdm-settings, rdm-noterm, rfm, rdm-launcher"
 
 # ─── Install icons ─────────────────────────────────────────
 
