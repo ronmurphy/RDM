@@ -20,6 +20,11 @@ if command -v rdm-idle-inhibit >/dev/null 2>&1; then
     rdm-idle-inhibit &
 fi
 
+# Rebuild KDE service cache so Dolphin/KDE apps have working "Open With" menus
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+    kbuildsycoca6 &
+fi
+
 # Tiling daemon (enabled via command center toggle or rdm.toml)
 if command -v rdm-snap >/dev/null 2>&1; then
     rdm-snap keybinds-status 2>/dev/null | grep -q enabled && rdm-snap daemon &

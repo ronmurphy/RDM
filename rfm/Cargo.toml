@@ -1,0 +1,8 @@
+[package]
+name = "rfm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gtk4 = { version = "0.9", features = ["v4_10"] }
+gdk-pixbuf = "0.20"

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+<requires lib="gtk" version="4.0"/>
+<object class="GtkGrid" id="main_grid">
+<property name="row-spacing">8</property>
+<property name="column-spacing">8</property>
+<property name="margin-start">12</property>
+<property name="margin-end">12</property>
+<property name="margin-top">12</property>
+<property name="margin-bottom">12</property>
+<property name="hexpand">true</property>
+<property name="vexpand">true</property>
+<property name="rui-rows">7</property>
+<property name="rui-columns">8</property>
+    <child>
+<object class="GtkHeaderBar" id="header_bar">
+        <property name="hexpand">true</property>
+    <child type="start">
+        <object class="GtkButton" id="btn_back">
+            <property name="icon-name">go-previous-symbolic</property>
+            <property name="tooltip-text">Back</property>
+        </object>
+    </child>
+    <child type="start">
+        <object class="GtkButton" id="btn_forward">
+            <property name="icon-name">go-next-symbolic</property>
+            <property name="tooltip-text">Forward</property>
+        </object>
+    </child>
+    <child type="start">
+        <object class="GtkButton" id="btn_up">
+            <property name="icon-name">go-up-symbolic</property>
+            <property name="tooltip-text">Parent folder</property>
+        </object>
+    </child>
+    <child type="start">
+        <object class="GtkButton" id="btn_home">
+            <property name="icon-name">go-home-symbolic</property>
+            <property name="tooltip-text">Home</property>
+        </object>
+    </child>
+    <child type="start">
+        <object class="GtkBox" id="view_toggle_box">
+            <style>
+                <class name="linked"/>
+            </style>
+            <child>
+                <object class="GtkToggleButton" id="btn_view_list">
+                    <property name="icon-name">view-list-symbolic</property>
+                    <property name="tooltip-text">List view</property>
+                    <property name="active">true</property>
+                </object>
+            </child>
+            <child>
+                <object class="GtkToggleButton" id="btn_view_grid">
+                    <property name="icon-name">view-grid-symbolic</property>
+                    <property name="tooltip-text">Icon view</property>
+                </object>
+            </child>
+        </object>
+    </child>
+    <child type="end">
+        <object class="GtkToggleButton" id="btn_hidden">
+            <property name="label">Hidden</property>
+            <property name="tooltip-text">Show hidden files</property>
+        </object>
+    </child>
+    <child type="end">
+        <object class="GtkButton" id="btn_refresh">
+            <property name="icon-name">view-refresh-symbolic</property>
+            <property name="tooltip-text">Refresh</property>
+        </object>
+    </child>
+<layout>
+<property name="column">0</property>
+<property name="row">0</property>
+<property name="column-span">8</property>
+<property name="row-span">1</property>
+</layout>
+</object>
+</child>
+    <child>
+<object class="GtkEntry" id="path_entry">
+        <property name="placeholder-text">/home/user/…</property>
+<property name="hexpand">true</property>
+<layout>
+<property name="column">0</property>
+<property name="row">1</property>
+<property name="column-span">8</property>
+<property name="row-span">1</property>
+</layout>
+</object>
+</child>
+    <child>
+<object class="GtkScrolledWindow" id="folder_tree">
+        <property name="vexpand">true</property>
+        <property name="width-request">180</property>
+        <property name="hscrollbar-policy">never</property>
+<layout>
+<property name="column">0</property>
+<property name="row">2</property>
+<property name="column-span">2</property>
+<property name="row-span">4</property>
+</layout>
+</object>
+</child>
+    <child>
+<object class="GtkScrolledWindow" id="file_list">
+        <property name="hexpand">true</property>
+<property name="vexpand">true</property>
+<layout>
+<property name="column">2</property>
+<property name="row">2</property>
+<property name="column-span">6</property>
+<property name="row-span">4</property>
+</layout>
+</object>
+</child>
+    <child>
+<object class="GtkLabel" id="status_bar">
+        <property name="label">0 items</property>
+<property name="xalign">0</property>
+<layout>
+<property name="column">0</property>
+<property name="row">6</property>
+<property name="column-span">8</property>
+<property name="row-span">1</property>
+</layout>
+</object>
+</child>
+</object>
+</interface>
