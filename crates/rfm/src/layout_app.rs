@@ -915,6 +915,17 @@ fn show_context_menu(
     });
     vbox.append(&trash_btn);
 
+    let empty_trash_btn = menu_button("Empty Trash", {
+        let pop = popover.clone();
+        move |_| {
+            pop.popdown();
+            let _ = std::process::Command::new("gio")
+                .args(["trash", "--empty"])
+                .spawn();
+        }
+    });
+    vbox.append(&empty_trash_btn);
+
     popover.set_child(Some(&vbox));
     // Unparent on close so refreshing the view doesn't trigger "remove non-child"
     popover.connect_closed(|p| p.unparent());
