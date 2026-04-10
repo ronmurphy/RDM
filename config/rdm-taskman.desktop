@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=RDM Task Manager
+GenericName=Task Manager
+Comment=View and manage running processes and system load
+Exec=rdm-taskman
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;GTK;
+Keywords=task;process;monitor;system;cpu;memory;kill;rdm;
+StartupNotify=true
+StartupWMClass=rdm-taskman

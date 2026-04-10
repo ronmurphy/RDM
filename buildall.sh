@@ -123,6 +123,7 @@ CRATES=(
     rdm-watermark
     rdm-notify
     rfm
+    rdm-taskman
 #    rdm-editor
 )
 

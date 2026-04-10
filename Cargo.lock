@@ -1301,6 +1301,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rdm-taskman"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "gtk4",
+ "libc",
+ "log",
+]
+
+[[package]]
 name = "rdm-watermark"
 version = "0.1.0"
 dependencies = [
